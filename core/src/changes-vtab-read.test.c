@@ -23,7 +23,7 @@ static void testChangesQueryForTable() {
   rc += crsql_getTableInfo(db, "foo", &tblInfo, &err);
   assert(rc == SQLITE_OK);
 
-  char *query = crsql_changesQueryForTable(tblInfo);
+  char *query = crsql_changesQueryForTable(tblInfo, 0);
 
   assert(strcmp(query,
                 "SELECT      \'foo\' as tbl,      quote(\"a\") as pks,      "

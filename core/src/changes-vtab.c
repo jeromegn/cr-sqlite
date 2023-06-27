@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "changes-vtab-common.h"
@@ -372,6 +373,8 @@ static int changesFilter(sqlite3_vtab_cursor *pVtabCursor, int idxNum,
     return SQLITE_ERROR;
   }
 
+  printf("zsql:\n %s\n", zSql);
+
   sqlite3_stmt *pStmt = 0;
   rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
   sqlite3_free(zSql);
@@ -384,14 +387,16 @@ static int changesFilter(sqlite3_vtab_cursor *pVtabCursor, int idxNum,
 
   // now bind the params.
   // for each arg, bind.
-  for (int i = 0; i < argc; ++i) {
-    rc = sqlite3_bind_value(pStmt, i + 1, argv[i]);
-    if (rc != SQLITE_OK) {
-      pTabBase->zErrMsg = sqlite3_mprintf(
-          "error binding params to the statement to extract "
-          "changes.");
-      sqlite3_finalize(pStmt);
-      return rc;
+  for (int j = 0; j < pTab->pExtData->tableInfosLen; ++j) {
+    for (int i = 0; i < argc; ++i) {
+      rc = sqlite3_bind_value(pStmt, i + j + 1, argv[i]);
+      if (rc != SQLITE_OK) {
+        pTabBase->zErrMsg = sqlite3_mprintf(
+            "error binding params to the statement to extract "
+            "changes.");
+        sqlite3_finalize(pStmt);
+        return rc;
+      }
     }
   }
 
@@ -444,6 +449,11 @@ static const char *getOperatorString(unsigned char op) {
 */
 static int changesBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo) {
   int idxNum = 0;
+
+  __builtin_dump_struct(pIdxInfo->aOrderBy, &printf);
+  int isDistinct = sqlite3_vtab_distinct(pIdxInfo);
+
+  printf("is distinct? %i\n", isDistinct);
 
   crsql_Changes_vtab *crsqlTab = (crsql_Changes_vtab *)tab;
   sqlite3_str *pStr = sqlite3_str_new(crsqlTab->db);

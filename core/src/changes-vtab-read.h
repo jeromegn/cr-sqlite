@@ -7,7 +7,8 @@ SQLITE_EXTENSION_INIT3
 #include "changes-vtab-common.h"
 #include "tableinfo.h"
 
-char *crsql_changesQueryForTable(crsql_TableInfo *tableInfo);
+char *crsql_changesQueryForTable(crsql_TableInfo *tableInfo,
+                                 const char *idxStr);
 
 #define TBL 0
 #define PKS 1

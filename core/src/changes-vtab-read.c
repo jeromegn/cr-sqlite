@@ -9,7 +9,8 @@
  * Construct the query to grab the changes made against
  * rows in a given table
  */
-char *crsql_changesQueryForTable(crsql_TableInfo *tableInfo) {
+char *crsql_changesQueryForTable(crsql_TableInfo *tableInfo,
+                                 const char *idxStr) {
   if (tableInfo->pksLen == 0) {
     return 0;
   }
@@ -24,9 +25,10 @@ char *crsql_changesQueryForTable(crsql_TableInfo *tableInfo) {
       __crsql_site_id as site_id,\
       _rowid_,\
       __crsql_seq as seq\
-    FROM \"%s__crsql_clock\"",
+    FROM \"%s__crsql_clock\"%s%s",
       tableInfo->tblName, crsql_quoteConcat(tableInfo->pks, tableInfo->pksLen),
-      tableInfo->tblName);
+      tableInfo->tblName, idxStr != 0 && strlen(idxStr) > 0 ? " WHERE " : "",
+      idxStr == 0 ? "" : idxStr);
 
   return zSql;
 }
@@ -51,7 +53,7 @@ char *crsql_changesUnionQuery(crsql_TableInfo **tableInfos, int tableInfosLen,
 
   // TODO: what if there are no table infos?
   for (i = 0; i < tableInfosLen; ++i) {
-    unionsArr[i] = crsql_changesQueryForTable(tableInfos[i]);
+    unionsArr[i] = crsql_changesQueryForTable(tableInfos[i], idxStr);
     if (unionsArr[i] == 0) {
       for (int j = 0; j < i; j++) {
         sqlite3_free(unionsArr[j]);
@@ -75,10 +77,8 @@ char *crsql_changesUnionQuery(crsql_TableInfo **tableInfos, int tableInfosLen,
   // compose the final query
   return sqlite3_mprintf(
       "SELECT tbl, pks, cid, col_vrsn, db_vrsn, site_id, _rowid_, seq FROM "
-      "(%z) "
-      "%s%s",
-      unionsStr, idxStr != 0 && strlen(idxStr) > 0 ? "WHERE " : "",
-      idxStr == 0 ? "" : idxStr);
+      "(%z) ",
+      unionsStr);
   // %z frees unionsStr https://www.sqlite.org/printf.html#percentz
 }
 
