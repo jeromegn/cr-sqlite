@@ -1,5 +1,4 @@
 on:
-  push:
   pull_request:
 name: "rs-valgrind"
 jobs:
@@ -21,7 +20,7 @@ jobs:
           path: ./
 
       - name: Install valgrind
-        run: sudo apt install -y valgrind
+        run: sudo apt update && sudo apt install -y valgrind
 
       - name: Install Cargo Valgrind
         run: |
@@ -32,12 +31,7 @@ jobs:
           cd core/rs/fractindex-core
           cargo valgrind test --features=loadable_extension
 
-      - name: Integration Tests
-        run: |
-          cd core/rs/integration-check
-          cargo valgrind test
-
       - name: Test Core
         run: |
           cd core/rs/core
-          cargo test --features=loadable_extension
+          cargo valgrind test --features=loadable_extension

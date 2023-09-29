@@ -1,10 +1,18 @@
 #![cfg_attr(not(test), no_std)]
 #![feature(vec_into_raw_parts)]
 
+// TODO: these pub mods are exposed for the integration testing
+// we should re-export in a `test` mod such that they do not become public apis
 mod alter;
 mod automigrate;
 mod backfill;
+#[cfg(feature = "test")]
+pub mod bootstrap;
+#[cfg(not(feature = "test"))]
 mod bootstrap;
+#[cfg(feature = "test")]
+pub mod c;
+#[cfg(not(feature = "test"))]
 mod c;
 mod changes_vtab;
 mod changes_vtab_read;
@@ -12,28 +20,42 @@ mod changes_vtab_write;
 mod compare_values;
 mod consts;
 mod create_cl_set_vtab;
+mod create_crr;
+#[cfg(feature = "test")]
+pub mod db_version;
+#[cfg(not(feature = "test"))]
+mod db_version;
+mod ext_data;
 mod is_crr;
+mod local_writes;
+#[cfg(feature = "test")]
+pub mod pack_columns;
+#[cfg(not(feature = "test"))]
 mod pack_columns;
 mod stmt_cache;
+#[cfg(feature = "test")]
+pub mod tableinfo;
+#[cfg(not(feature = "test"))]
+mod tableinfo;
 mod teardown;
+#[cfg(feature = "test")]
+pub mod test_exports;
 mod triggers;
 mod unpack_columns_vtab;
 mod util;
 
 use core::{ffi::c_char, slice};
 extern crate alloc;
-use alloc::vec::Vec;
-pub use automigrate::*;
-pub use backfill::*;
+use automigrate::*;
+use backfill::*;
 use core::ffi::{c_int, CStr};
-pub use is_crr::*;
-use pack_columns::crsql_pack_columns;
-pub use pack_columns::unpack_columns;
-pub use pack_columns::ColumnValue;
+use create_crr::create_crr;
+use is_crr::*;
 use sqlite::ResultCode;
 use sqlite_nostd as sqlite;
 use sqlite_nostd::{Connection, Context, Value};
-pub use teardown::*;
+use tableinfo::is_table_compatible;
+use teardown::*;
 
 pub extern "C" fn crsql_as_table(
     ctx: *mut sqlite::context,
@@ -97,7 +119,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
             -1,
             sqlite::UTF8,
             None,
-            Some(crsql_pack_columns),
+            Some(pack_columns::crsql_pack_columns),
             None,
             None,
             None,
@@ -132,51 +154,6 @@ pub extern "C" fn sqlite3_crsqlcore_init(
 }
 
 #[no_mangle]
-pub extern "C" fn crsql_backfill_table(
-    db: *mut sqlite::sqlite3,
-    table: *const c_char,
-    pk_cols: *const *const c_char,
-    pk_cols_len: c_int,
-    non_pk_cols: *const *const c_char,
-    non_pk_cols_len: c_int,
-    is_commit_alter: c_int,
-    no_tx: c_int,
-) -> c_int {
-    let table = unsafe { CStr::from_ptr(table).to_str() };
-    let pk_cols = unsafe {
-        let parts = slice::from_raw_parts(pk_cols, pk_cols_len as usize);
-        parts
-            .iter()
-            .map(|&p| CStr::from_ptr(p).to_str())
-            .collect::<Result<Vec<_>, _>>()
-    };
-    let non_pk_cols = unsafe {
-        let parts = slice::from_raw_parts(non_pk_cols, non_pk_cols_len as usize);
-        parts
-            .iter()
-            .map(|&p| CStr::from_ptr(p).to_str())
-            .collect::<Result<Vec<_>, _>>()
-    };
-
-    let result = match (table, pk_cols, non_pk_cols) {
-        (Ok(table), Ok(pk_cols), Ok(non_pk_cols)) => backfill_table(
-            db,
-            table,
-            pk_cols,
-            non_pk_cols,
-            is_commit_alter != 0,
-            no_tx != 0,
-        ),
-        _ => Err(ResultCode::ERROR),
-    };
-
-    match result {
-        Ok(result) => result as c_int,
-        Err(result) => result as c_int,
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn crsql_remove_crr_triggers_if_exist(
     db: *mut sqlite::sqlite3,
     table: *const c_char,
@@ -208,4 +185,40 @@ pub extern "C" fn crsql_is_crr(db: *mut sqlite::sqlite3, table: *const c_char) -
     } else {
         (ResultCode::NOMEM as c_int) * -1
     }
+}
+
+#[no_mangle]
+pub extern "C" fn crsql_is_table_compatible(
+    db: *mut sqlite::sqlite3,
+    table: *const c_char,
+    err: *mut *mut c_char,
+) -> c_int {
+    if let Ok(table) = unsafe { CStr::from_ptr(table).to_str() } {
+        is_table_compatible(db, table, err)
+            .map(|x| x as c_int)
+            .unwrap_or_else(|err| (err as c_int) * -1)
+    } else {
+        (ResultCode::NOMEM as c_int) * -1
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn crsql_create_crr(
+    db: *mut sqlite::sqlite3,
+    schema: *const c_char,
+    table: *const c_char,
+    is_commit_alter: c_int,
+    no_tx: c_int,
+    err: *mut *mut c_char,
+) -> c_int {
+    let schema = unsafe { CStr::from_ptr(schema).to_str() };
+    let table = unsafe { CStr::from_ptr(table).to_str() };
+
+    return match (table, schema) {
+        (Ok(table), Ok(schema)) => {
+            create_crr(db, schema, table, is_commit_alter != 0, no_tx != 0, err)
+                .unwrap_or_else(|err| err) as c_int
+        }
+        _ => ResultCode::NOMEM as c_int,
+    };
 }

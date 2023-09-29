@@ -11,8 +11,6 @@ SQLITE_EXTENSION_INIT1
 #include "consts.h"
 #include "ext-data.h"
 #include "rust.h"
-#include "tableinfo.h"
-#include "util.h"
 
 // see
 // https://github.com/chromium/chromium/commit/579b3dd0ea41a40da8a61ab87a8b0bc39e158998
@@ -47,7 +45,7 @@ static void dbVersionFunc(sqlite3_context *context, int argc,
   char *errmsg = 0;
   crsql_ExtData *pExtData = (crsql_ExtData *)sqlite3_user_data(context);
   sqlite3 *db = sqlite3_context_db_handle(context);
-  int rc = crsql_getDbVersion(db, pExtData, &errmsg);
+  int rc = crsql_fill_db_version_if_needed(db, pExtData, &errmsg);
   if (rc != SQLITE_OK) {
     sqlite3_result_error(context, errmsg, -1);
     sqlite3_free(errmsg);
@@ -72,31 +70,18 @@ static void nextDbVersionFunc(sqlite3_context *context, int argc,
   char *errmsg = 0;
   crsql_ExtData *pExtData = (crsql_ExtData *)sqlite3_user_data(context);
   sqlite3 *db = sqlite3_context_db_handle(context);
-  // "getDbVersion" is really just filling the cached db version value if
-  // invalid
-  int rc = crsql_getDbVersion(db, pExtData, &errmsg);
-  if (rc != SQLITE_OK) {
-    sqlite3_result_error(context, errmsg, -1);
-    sqlite3_free(errmsg);
-    return;
-  }
-
   sqlite3_int64 providedVersion = 0;
   if (argc == 1) {
     providedVersion = sqlite3_value_int64(argv[0]);
   }
 
-  // now return max of:
-  // dbVersion + 1, pendingDbVersion, arg (if there is one)
-  // and set pendingDbVersion to that max
-  sqlite3_int64 ret = pExtData->dbVersion + 1;
-  if (ret < pExtData->pendingDbVersion) {
-    ret = pExtData->pendingDbVersion;
+  sqlite3_int64 ret =
+      crsql_next_db_version(db, pExtData, providedVersion, &errmsg);
+  if (ret < 0) {
+    sqlite3_result_error(context, errmsg, -1);
+    sqlite3_free(errmsg);
+    return;
   }
-  if (ret < providedVersion) {
-    ret = providedVersion;
-  }
-  pExtData->pendingDbVersion = ret;
 
   sqlite3_result_int64(context, ret);
 }
@@ -112,60 +97,6 @@ static void getSeqFunc(sqlite3_context *context, int argc,
                        sqlite3_value **argv) {
   crsql_ExtData *pExtData = (crsql_ExtData *)sqlite3_user_data(context);
   sqlite3_result_int(context, pExtData->seq);
-}
-
-/**
- * Create a new crr --
- * all triggers, views, tables
- */
-int crsql_createCrr(sqlite3 *db, const char *schemaName, const char *tblName,
-                    int isCommitAlter, int noTx, char **err) {
-  int rc = SQLITE_OK;
-  crsql_TableInfo *tableInfo = 0;
-
-  if (!crsql_isTableCompatible(db, tblName, err)) {
-    return SQLITE_ERROR;
-  }
-
-  rc = crsql_is_crr(db, tblName);
-  if (rc < 0) {
-    return rc * -1;
-  }
-  if (rc == 1) {
-    return SQLITE_OK;
-  }
-
-  rc = crsql_getTableInfo(db, tblName, &tableInfo, err);
-
-  if (rc != SQLITE_OK) {
-    crsql_freeTableInfo(tableInfo);
-    return rc;
-  }
-
-  rc = crsql_create_clock_table(db, tableInfo, err);
-  if (rc == SQLITE_OK) {
-    rc = crsql_remove_crr_triggers_if_exist(db, tableInfo->tblName);
-    if (rc == SQLITE_OK) {
-      rc = crsql_create_crr_triggers(db, tableInfo, err);
-    }
-  }
-
-  const char **pkNames = sqlite3_malloc(sizeof(char *) * tableInfo->pksLen);
-  for (size_t i = 0; i < tableInfo->pksLen; i++) {
-    pkNames[i] = tableInfo->pks[i].name;
-  }
-  const char **nonPkNames =
-      sqlite3_malloc(sizeof(char *) * tableInfo->nonPksLen);
-  for (size_t i = 0; i < tableInfo->nonPksLen; i++) {
-    nonPkNames[i] = tableInfo->nonPks[i].name;
-  }
-  rc = crsql_backfill_table(db, tblName, pkNames, tableInfo->pksLen, nonPkNames,
-                            tableInfo->nonPksLen, isCommitAlter, noTx);
-  sqlite3_free(pkNames);
-  sqlite3_free(nonPkNames);
-
-  crsql_freeTableInfo(tableInfo);
-  return rc;
 }
 
 static void crsqlSyncBit(sqlite3_context *context, int argc,
@@ -221,7 +152,7 @@ static void crsqlMakeCrrFunc(sqlite3_context *context, int argc,
     return;
   }
 
-  rc = crsql_createCrr(db, schemaName, tblName, 0, 0, &errmsg);
+  rc = crsql_create_crr(db, schemaName, tblName, 0, 0, &errmsg);
   if (rc != SQLITE_OK) {
     sqlite3_result_error(context, errmsg, -1);
     sqlite3_result_error_code(context, rc);
@@ -305,7 +236,7 @@ static void crsqlCommitAlterFunc(sqlite3_context *context, int argc,
   crsql_ExtData *pExtData = (crsql_ExtData *)sqlite3_user_data(context);
   rc = crsql_compact_post_alter(db, tblName, pExtData, &errmsg);
   if (rc == SQLITE_OK) {
-    rc = crsql_createCrr(db, schemaName, tblName, 1, 0, &errmsg);
+    rc = crsql_create_crr(db, schemaName, tblName, 1, 0, &errmsg);
   }
   if (rc == SQLITE_OK) {
     rc = sqlite3_exec(db, "RELEASE alter_crr", 0, 0, &errmsg);
@@ -342,6 +273,7 @@ static int commitHook(void *pUserData) {
   pExtData->dbVersion = pExtData->pendingDbVersion;
   pExtData->pendingDbVersion = -1;
   pExtData->seq = 0;
+  pExtData->updatedTableInfosThisTx = 0;
   return SQLITE_OK;
 }
 
@@ -350,6 +282,7 @@ static void rollbackHook(void *pUserData) {
 
   pExtData->pendingDbVersion = -1;
   pExtData->seq = 0;
+  pExtData->updatedTableInfosThisTx = 0;
 }
 
 int sqlite3_crsqlrustbundle_init(sqlite3 *db, char **pzErrMsg,
@@ -467,6 +400,22 @@ __declspec(dllexport)
     rc = sqlite3_create_function(db, "crsql_finalize", -1,
                                  SQLITE_UTF8 | SQLITE_DIRECTONLY, pExtData,
                                  crsqlFinalize, 0, 0);
+  }
+
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_create_function(db, "crsql_after_update", -1,
+                                 SQLITE_UTF8 | SQLITE_INNOCUOUS, pExtData,
+                                 crsql_after_update, 0, 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_create_function(db, "crsql_after_insert", -1,
+                                 SQLITE_UTF8 | SQLITE_INNOCUOUS, pExtData,
+                                 crsql_after_insert, 0, 0);
+  }
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_create_function(db, "crsql_after_delete", -1,
+                                 SQLITE_UTF8 | SQLITE_INNOCUOUS, pExtData,
+                                 crsql_after_delete, 0, 0);
   }
 
   if (rc == SQLITE_OK) {

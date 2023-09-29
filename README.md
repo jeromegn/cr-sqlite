@@ -9,6 +9,18 @@ A component of the [vulcan](https://vlcn.io) project.
 
 [![](https://dcbadge.vercel.app/api/server/AtdVY6zDW3)](https://discord.gg/AtdVY6zDW3)
 
+
+# Examples
+
+Example applications using cr-sqlite to sync state.
+
+- Vite starter - [Example](https://vite-starter2.fly.dev/) | [Repository](https://github.com/vlcn-io/vite-starter)
+- TodoMVC - [Example](https://vlcn-live-examples.fly.dev/) | [Repository](https://github.com/vlcn-io/live-examples)
+- [Svelte Store](https://github.com/Azarattum/CRStore)
+- [Tutorials](https://vlcn.io/docs/networking/whole-crr-sync)
+- [WIP Local-First Presentation Editor](https://github.com/tantaman/strut)
+- Basic setup & sync via an [Observable Notebook](https://observablehq.com/@tantaman/cr-sqlite-basic-setup)
+
 # "It's like Git, for your data."
 
 CR-SQLite is a [run-time loadable extension](https://www.sqlite.org/loadext.html) for [SQLite](https://www.sqlite.org/index.html) and [libSQL](https://github.com/libsql/libsql). It allows merging different SQLite databases together that have taken independent writes.
@@ -40,17 +52,11 @@ Companies:
 Individuals:
 [robinvasan](https://github.com/robinvasan) | [iansinnott](https://github.com/iansinnott) | [davefowler](https://github.com/davefowler) | [barbalex](https://github.com/barbalex)
 
-# Contributors & Collaborators
-
-<img src="https://fly.io/static/images/brand/logo-portrait.svg" width="96" />
-
-[riffle.systems](https://riffle.systems/)
-
 # Perf
 
 Perf data: https://github.com/vlcn-io/cr-sqlite/blob/main/py/perf/perf.ipynb
 
-- Currently inserts into CRRs are 2.5-3x slower than inserts into regular SQLite tables.
+- Currently inserts into CRRs are 2.5x slower than inserts into regular SQLite tables.
 - Reads are the same speed
 
 # Usage
@@ -86,8 +92,8 @@ Usage looks like:
 .load crsqlite
 .mode qbox
 -- create tables as normal
-create table foo (a primary key, b);
-create table baz (a primary key, b, c, d);
+create table foo (a primary key not null, b);
+create table baz (a primary key not null, b, c, d);
 
 -- update those tables to be crrs / crdts
 select crsql_as_crr('foo');
@@ -139,15 +145,6 @@ select * from baz;
 select crsql_finalize();
 ```
 
-# Example Apps
-
-Example apps that use `cr-sqlite`:
-
-- Basic setup & sync via an [Observable Notebook](https://observablehq.com/@tantaman/cr-sqlite-basic-setup)
-- TodoMVC - https://github.com/vlcn-io/live-examples
-- [Tutorials](https://vlcn.io/docs/guide-sync)
-- [WIP Local-First Presentation Editor](https://github.com/tantaman/strut)
-
 # Packages
 
 Pre-built binaries of the extension are available in the [releases section](https://github.com/vlcn-io/cr-sqlite/releases).
@@ -183,7 +180,7 @@ Example table definition:
 
 ```sql
 CREATE CLSet post (
- id INTEGER PRIMARY KEY,
+ id INTEGER PRIMARY KEY NOT NULL,
  views COUNTER,
  content PERITEXT,
  owner_id LWW INTEGER
@@ -231,6 +228,8 @@ Approach 2 has the following properties:
 This is much more akin to git and event sourcing but with the drawback being that it is much more write heavy and much more space intensive.
 
 # Building
+
+For a table version, build against a [release tag](https://github.com/vlcn-io/cr-sqlite/releases) as main may not be 100% stable.
 
 You'll need to install Rust.
 

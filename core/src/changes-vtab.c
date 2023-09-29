@@ -8,7 +8,6 @@
 #include "crsqlite.h"
 #include "ext-data.h"
 #include "rust.h"
-#include "util.h"
 
 int crsql_changes_next(sqlite3_vtab_cursor *cur);
 
@@ -44,8 +43,8 @@ static int changesConnect(sqlite3 *db, void *pAux, int argc,
   pNew->db = db;
   pNew->pExtData = (crsql_ExtData *)pAux;
 
-  rc = crsql_ensureTableInfosAreUpToDate(db, pNew->pExtData,
-                                         &(*ppVtab)->zErrMsg);
+  rc = crsql_ensure_table_infos_are_up_to_date(db, pNew->pExtData,
+                                               &(*ppVtab)->zErrMsg);
   if (rc != SQLITE_OK) {
     *pzErr = sqlite3_mprintf("Could not update table infos");
     sqlite3_free(pNew);

@@ -10,6 +10,8 @@ use core::ffi::{c_char, c_int};
 use core::panic::PanicInfo;
 use crsql_core;
 use crsql_core::sqlite3_crsqlcore_init;
+#[cfg(feature = "test")]
+pub use crsql_core::test_exports;
 use crsql_fractindex_core::sqlite3_crsqlfractionalindex_init;
 use sqlite_nostd as sqlite;
 use sqlite_nostd::SQLite3Allocator;

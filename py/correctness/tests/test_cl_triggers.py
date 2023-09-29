@@ -22,7 +22,8 @@ import pytest
 # In metadata tables or otherwise
 def test_upsert_non_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b TEXT) STRICT;")
+    c.execute(
+        "CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL NOT NULL, b TEXT) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -42,7 +43,7 @@ def test_upsert_non_existing():
 
 def test_insert_delete_insert_delete():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -64,7 +65,7 @@ def test_insert_delete_insert_delete():
 # in the base tables.
 def test_upsert_previously_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -97,7 +98,7 @@ def test_upsert_previously_existing():
 # Here we are upserting in order to update a row that exists in metadata and base tables.
 def test_upsert_currently_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -128,7 +129,7 @@ def test_upsert_currently_existing():
 # Run of the mill update against a row that exists
 def test_update_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -152,7 +153,7 @@ def test_update_existing():
 # Not doing an upsert here. That is covered by upsert test cases.
 def test_insert_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -172,7 +173,7 @@ def test_insert_existing():
 # Shoudl be a no-op
 def test_insert_or_ignore_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -191,7 +192,7 @@ def test_insert_or_ignore_existing():
 # Run of the mill delete
 def test_delete_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -207,7 +208,7 @@ def test_delete_existing():
 # Try deleting something we already deleted. Should be no-op given the row isn't there to indicate a need to bump metadata
 def test_delete_previously_deleted():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -237,7 +238,7 @@ def test_delete_previously_deleted():
 # - pko
 def test_change_primary_key_to_something_new():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -245,17 +246,18 @@ def test_change_primary_key_to_something_new():
     c.execute("UPDATE foo SET a = 2 WHERE a = 1")
 
     changes = c.execute(
-        "SELECT pk, cid, cl FROM crsql_changes WHERE cid = '-1'").fetchall()
+        "SELECT pk, cid, cl FROM crsql_changes").fetchall()
     # pk 1 was deleted so has a CL of 2
-    # pk 2 was created so has a CL of 1
-    assert (changes == [(b'\x01\t\x02', '-1', 1), (b'\x01\t\x01', '-1', 2)])
+    # pk 2 was created so has a CL of 1 and also has the `b` column data as that was moved!
+    assert (changes == [(b'\x01\t\x02', 'b', 1),
+            (b'\x01\t\x01', '-1', 2), (b'\x01\t\x02', '-1', 1)])
 
 
 # Previously existing thing should get bumped to re-existing
 # Previously existing means we have metadata for the row but it is not a live row in the base tables.
 def test_change_primary_key_to_previously_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -266,10 +268,11 @@ def test_change_primary_key_to_previously_existing():
     c.execute("UPDATE foo SET a = 2 WHERE a = 1")
 
     changes = c.execute(
-        "SELECT pk, cid, cl FROM crsql_changes WHERE cid = '-1'").fetchall()
+        "SELECT pk, cid, cl FROM crsql_changes").fetchall()
     # pk 1 was deleted so has a CL of 2
     # pk 2 was resurrected so has a CL of 3
-    assert (changes == [(b'\x01\t\x02', '-1', 3), (b'\x01\t\x01', '-1', 2)])
+    assert (changes == [(b'\x01\t\x02', 'b', 3),
+            (b'\x01\t\x01', '-1', 2), (b'\x01\t\x02', '-1', 3)])
 
     #  try changing to and away from 1 again to ensure we aren't stuck at 2
 
@@ -277,7 +280,7 @@ def test_change_primary_key_to_previously_existing():
 # Changing to something currently existing is an update that replaces the thing on conflict
 def test_change_primary_key_to_currently_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -294,12 +297,12 @@ def test_change_primary_key_to_currently_existing():
     # pk 1 is dead (cl of 2) given we mutated / updated away from it. E.g.,
     # set a = 2 where a = 1
     assert (changes == [(b'\x01\t\x02', 'b', 1),
-            (b'\x01\t\x02', '-1', 1), (b'\x01\t\x01', '-1', 2)])
+            (b'\x01\t\x01', '-1', 2), (b'\x01\t\x02', '-1', 1)])
 
 
 def test_change_primary_key_away_from_thing_with_large_length():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -312,16 +315,17 @@ def test_change_primary_key_away_from_thing_with_large_length():
 
     c.execute("UPDATE foo SET a = 2 WHERE a = 1")
     changes = c.execute(
-        "SELECT pk, cid, cl FROM crsql_changes WHERE cid = '-1'").fetchall()
+        "SELECT pk, cid, cl FROM crsql_changes").fetchall()
     # first time existing for 2
     # third deletion for 1
-    assert (changes == [(b'\x01\t\x02', '-1', 1), (b'\x01\t\x01', '-1', 6)])
+    assert (changes == [(b'\x01\t\x02', 'b', 1),
+            (b'\x01\t\x01', '-1', 6), (b'\x01\t\x02', '-1', 1)])
 
 
 # Test inserting something for which we have delete records for but no actual row
 def test_insert_previously_existing():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
 
@@ -330,9 +334,9 @@ def test_insert_previously_existing():
     c.execute("INSERT INTO foo VALUES (1, 2)")
 
     changes = c.execute(
-        "SELECT pk, cid, cl FROM crsql_changes WHERE cid = '-1'").fetchall()
+        "SELECT pk, cid, cl FROM crsql_changes").fetchall()
 
-    assert (changes == [(b'\x01\t\x01', '-1', 3)])
+    assert (changes == [(b'\x01\t\x01', '-1', 3), (b'\x01\t\x01', 'b', 3)])
 
 
 # Use hypothesis to generate a random sequence of events against a row?

@@ -1,3 +1,11 @@
+# db-version
+
+db version as col version for tx preservation on merge.
+
+Each `col_version` is currently incremented independently. We can instead set it to the current `db_version` to ensure that all values set in the same transaction can also all win together when merging.
+
+This isn't guaranteed since the peer being merged into could be way ahead in db_version overall but have some records behind in db_version.
+
 # pk-lookup
 
 - New table
@@ -39,3 +47,27 @@ function crsql_next_db_version(arg?) {
 ```
 
 On commit, pending becomes actual.
+
+# Trigger opt
+
+- function to `insert and save` a lookaside in `insert_trigger`
+- function to `get and save` a lookaside in `update_trigger`
+  - replace these lookups: `(SELECT __crsql_key FROM \"{table_name}__crsql_pks\" WHERE {pk_where_list})`
+- 
+
+- Test changing pks in update creates key lookaside correctly.
+
+---
+
+Assuming we re-write to use a function...
+
+```ts
+function after_update(table, cols_new, cols_old) {
+  // cols_new and cols_old are _in order_ as according to table_info
+
+  // 1. Lookup the old record with `cols_old`
+  // 2. Do the pk delete stuff if there exists a record with old
+  // 3. If any pk is different, record a create record (sqlite value compare)
+  // 4. For each non_pk, record the clock metadata
+}
+```

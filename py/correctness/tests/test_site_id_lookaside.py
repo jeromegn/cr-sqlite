@@ -7,7 +7,7 @@ import random
 
 def make_simple_schema():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY, b INTEGER) STRICT;")
+    c.execute("CREATE TABLE foo (a INTEGER PRIMARY KEY NOT NULL, b INTEGER) STRICT;")
     c.execute("SELECT crsql_as_crr('foo')")
     c.commit()
     return c
@@ -23,7 +23,7 @@ def test_insert_site_id():
 
     # Ordinal value, not site id, is in the clock table
     ord = a.execute(
-        "SELECT __crsql_site_id FROM foo__crsql_clock").fetchone()[0]
+        "SELECT site_id FROM foo__crsql_clock").fetchone()[0]
     assert (ord == 1)
     # site id is in the site id table for that given ordinal
     assert (

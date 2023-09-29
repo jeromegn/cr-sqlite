@@ -5,7 +5,7 @@ import pytest
 changes_query = "SELECT [table], [pk], [cid], [val] FROM crsql_changes"
 changes_with_versions_query = "SELECT [table], [pk], [cid], [val], [db_version], [col_version] FROM crsql_changes"
 full_changes_query = "SELECT [table], [pk], [cid], [val], [db_version], [col_version], [site_id] FROM crsql_changes"
-clock_query = "SELECT rowid, __crsql_col_version, __crsql_db_version, __crsql_col_name, __crsql_site_id FROM todo__crsql_clock"
+clock_query = "SELECT key, col_version, db_version, col_name, site_id FROM todo__crsql_clock"
 
 
 def test_c1_4_no_primary_keys():
@@ -17,15 +17,15 @@ def test_c1_4_no_primary_keys():
 
 def test_c1_3_quoted_identifiers():
     c = connect(":memory:")
-    c.execute("create table \"foo\" (a primary key)")
+    c.execute("create table \"foo\" (a primary key not null)")
     c.execute("select crsql_as_crr('foo')")
-    c.execute("create table `bar` (a primary key)")
+    c.execute("create table `bar` (a primary key not null)")
     c.execute("select crsql_as_crr('bar')")
-    c.execute("create table [baz] (a primary key)")
+    c.execute("create table [baz] (a primary key not null)")
     c.execute("select crsql_as_crr('baz')")
 
     def check_clock(t): return c.execute(
-        "SELECT rowid, __crsql_col_version, __crsql_db_version, __crsql_col_name, __crsql_site_id FROM {t}__crsql_clock".format(t=t)).fetchall()
+        "SELECT col_version, db_version, col_name, site_id FROM {t}__crsql_clock".format(t=t)).fetchall()
 
     check_clock("foo")
     check_clock("bar")
@@ -34,24 +34,30 @@ def test_c1_3_quoted_identifiers():
 
 def test_c1_c5_compound_primary_key():
     c = connect(":memory:")
-    c.execute("create table foo (a, b, c, primary key (a, b))")
+    c.execute("create table foo (a not null, b not null, c, primary key (a, b))")
     c.execute("select crsql_as_crr('foo')")
 
-    c.execute("SELECT a, b, __crsql_col_version, __crsql_col_name, __crsql_db_version, __crsql_site_id FROM foo__crsql_clock").fetchall()
+    c.execute(
+        "SELECT key, col_version, col_name, db_version, site_id FROM foo__crsql_clock").fetchall()
+    c.execute(
+        "SELECT __crsql_key, a, b FROM foo__crsql_pks").fetchall()
     # with pytest.raises(Exception) as e_info:
     # c.execute("SELECT a__crsql_v FROM foo__crsql_crr").fetchall()
 
 
 def test_c1_6_single_primary_key():
     c = connect(":memory:")
-    c.execute("create table foo (a, b, c, primary key (a))")
+    c.execute("create table foo (a not null, b, c, primary key (a))")
     c.execute("select crsql_as_crr('foo')")
-    c.execute("SELECT a, __crsql_col_version, __crsql_col_name, __crsql_db_version, __crsql_site_id FROM foo__crsql_clock").fetchall()
+    c.execute(
+        "SELECT key, col_version, col_name, db_version, site_id FROM foo__crsql_clock").fetchall()
+    c.execute(
+        "SELECT __crsql_key, a FROM foo__crsql_pks").fetchall()
 
 
 def test_c2_create_index():
     c = connect(":memory:")
-    c.execute("create table foo (a primary key, b, c)")
+    c.execute("create table foo (a primary key not null, b, c)")
 
     # TODO: create index is silent failing in some cases?
     c.execute("create index foo_idx on foo (b)")
@@ -64,7 +70,7 @@ def test_c2_create_index():
 
 def setup_alter_test():
     c = connect(":memory:")
-    c.execute("CREATE TABLE todo (id PRIMARY KEY, name, complete, list);")
+    c.execute("CREATE TABLE todo (id PRIMARY KEY NOT NULL, name, complete, list);")
     c.execute("SELECT crsql_as_crr('todo');")
     c.execute("INSERT INTO todo VALUES (1, 'cook', 0, 'home');")
     c.commit()
@@ -80,10 +86,8 @@ def test_drop_clock_on_col_remove():
     assert (changes == expected)
 
     clock_entries = c.execute(clock_query).fetchall()
-    assert (clock_entries == [
-        (1, 1, 1, 'name', None),
-        (2, 1, 1, 'complete', None),
-        (3, 1, 1, 'list', None)])
+    assert (clock_entries == [(1, 1, 1, 'complete', None),
+            (1, 1, 1, 'list', None), (1, 1, 1, 'name', None)])
 
     c.execute("SELECT crsql_begin_alter('todo');")
     # Dropping a column should remove its entries from our replication logs.
@@ -101,7 +105,7 @@ def test_drop_clock_on_col_remove():
     clock_entries = c.execute(clock_query).fetchall()
     assert (
         clock_entries == [
-            (1, 1, 1, 'name', None), (2, 1, 1, 'complete', None)]
+            (1, 1, 1, 'complete', None), (1, 1, 1, 'name', None)]
     )
 
 
@@ -192,7 +196,8 @@ def test_delete_sentinels_not_lost():
 
 def test_pk_only_sentinels():
     c = connect(":memory:")
-    c.execute("CREATE TABLE assoc (id1, id2, PRIMARY KEY (id1, id2));")
+    c.execute(
+        "CREATE TABLE assoc (id1 NOT NULL, id2 NOT NULL, PRIMARY KEY (id1, id2));")
     c.execute("SELECT crsql_as_crr('assoc');")
     c.execute("INSERT INTO assoc VALUES (1, 2);")
     c.commit()
@@ -221,7 +226,7 @@ def test_pk_only_sentinels():
 
 def test_backfill_existing_data():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, name);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, name);")
     c.execute("INSERT INTO foo VALUES (1, 'bar');")
     c.execute("INSERT INTO foo VALUES (2, 'baz');")
     c.execute("INSERT INTO foo (id) VALUES (3);")
@@ -243,7 +248,7 @@ def test_backfill_existing_data():
 def test_backfill_moves_dbversion():
     c = connect(":memory:")
     # First table which'll get db_version 1 for all rows backfilled
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, name);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, name);")
     c.execute("INSERT INTO foo VALUES (1, 'bar');")
     c.execute("INSERT INTO foo VALUES (2, 'baz');")
     c.commit()
@@ -252,7 +257,7 @@ def test_backfill_moves_dbversion():
     c.commit()
 
     # Next table which should get db_Version 2 for all rows backfilled
-    c.execute("CREATE TABLE bar (id PRIMARY KEY, name);")
+    c.execute("CREATE TABLE bar (id PRIMARY KEY NOT NULL, name);")
     c.execute("INSERT INTO bar VALUES (1, 'bar');")
     c.execute("INSERT INTO bar (id) VALUES (3);")
 
@@ -273,7 +278,7 @@ def test_backfill_moves_dbversion():
 # on alter commit.
 def test_backfill_for_alter_does_not_move_dbversion():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, name TEXT DEFAULT NULL);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, name TEXT DEFAULT NULL);")
     c.execute("INSERT INTO foo VALUES (1, 'bar');")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
@@ -283,7 +288,7 @@ def test_backfill_for_alter_does_not_move_dbversion():
     # - add a row with a name and age
     c.execute("SELECT crsql_begin_alter('foo');")
     c.execute(
-        "CREATE TABLE new_foo(id PRIMARY KEY, name TEXT DEFAULT 'none', age INTEGER DEFAULT NULL);")
+        "CREATE TABLE new_foo(id PRIMARY KEY NOT NULL, name TEXT DEFAULT 'none', age INTEGER DEFAULT NULL);")
     # copy over old data
     c.execute("INSERT INTO new_foo (id, name) SELECT id, name FROM foo;")
     # insert a new row during the migration
@@ -309,7 +314,7 @@ def test_backfill_for_alter_does_not_move_dbversion():
 
 def test_add_col_with_default():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, name TEXT DEFAULT NULL);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, name TEXT DEFAULT NULL);")
     c.execute("INSERT INTO foo VALUES (1, 'bar');")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
@@ -328,7 +333,7 @@ def test_add_col_with_default():
 
 def test_add_col_nullable():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, name TEXT DEFAULT NULL);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, name TEXT DEFAULT NULL);")
     c.execute("INSERT INTO foo VALUES (1, 'bar');")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
@@ -343,7 +348,7 @@ def test_add_col_nullable():
 
 def test_add_col_implicit_nullable():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, name TEXT DEFAULT NULL);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, name TEXT DEFAULT NULL);")
     c.execute("INSERT INTO foo VALUES (1, 'bar');")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
@@ -358,14 +363,14 @@ def test_add_col_implicit_nullable():
 
 def test_add_col_through_12step():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, name TEXT DEFAULT NULL);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, name TEXT DEFAULT NULL);")
     c.execute("INSERT INTO foo (id) VALUES (3);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
 
     c.execute("SELECT crsql_begin_alter('foo');")
     c.execute(
-        "CREATE TABLE new_foo(id PRIMARY KEY, name TEXT DEFAULT NULL, age INTEGER DEFAULT NULL);")
+        "CREATE TABLE new_foo(id PRIMARY KEY NOT NULL, name TEXT DEFAULT NULL, age INTEGER DEFAULT NULL);")
     # copy over old data
     c.execute("INSERT INTO new_foo (id, name) SELECT id, name FROM foo;")
     c.execute("INSERT INTO new_foo (id, name, age) VALUES (22, 'baz', 33);")
@@ -384,7 +389,7 @@ def test_add_col_through_12step():
 
 def test_pk_only_table_backfill():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL);")
     c.execute("INSERT INTO foo VALUES (1);")
     c.execute("INSERT INTO foo VALUES (2);")
     c.execute("SELECT crsql_as_crr('foo');")
@@ -404,7 +409,7 @@ def test_pk_only_table_backfill():
 # we may never record the insert of the row with just the pk column.
 def test_pk_and_default_backfill():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY, b);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL, b);")
     c.execute("INSERT INTO foo (id) VALUES (1);")
     c.execute("INSERT INTO foo (id) VALUES (2);")
     c.execute("SELECT crsql_as_crr('foo');")
@@ -418,13 +423,13 @@ def test_pk_and_default_backfill():
 
 def test_pk_and_default_backfill_post12step_with_new_rows():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
 
     c.execute("SELECT crsql_begin_alter('foo');")
     c.execute(
-        "CREATE TABLE new_foo(id PRIMARY KEY, b);")
+        "CREATE TABLE new_foo(id PRIMARY KEY NOT NULL, b);")
     # copy over old data
     c.execute("INSERT INTO new_foo (id) VALUES (1);")
     c.execute("INSERT INTO new_foo (id) VALUES (2);")
@@ -452,7 +457,7 @@ def test_add_column_and_set_column():
     # if we do this and then do the `insert into new_foo` do we end
     # up missing these updates?
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (id PRIMARY KEY);")
+    c.execute("CREATE TABLE foo (id PRIMARY KEY NOT NULL);")
     c.execute("INSERT INTO foo (id) VALUES (3);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
@@ -474,7 +479,7 @@ def test_add_column_and_set_column():
 # They need to remove the rows then start the migration.
 def test_remove_rows_on_alter():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a PRIMARY KEY, b);")
+    c.execute("CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.execute("INSERT INTO foo VALUES (1, 2);")
     c.execute("INSERT INTO foo VALUES (3, 4);")
@@ -520,7 +525,7 @@ def test_change_existing_values_on_alter():
 # Table structures are identical but we change primary key membership
 def test_remove_col_from_pk():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a, b, c, PRIMARY KEY (a, b));")
+    c.execute("CREATE TABLE foo (a NOT NULL, b NOT NULL, c, PRIMARY KEY (a, b));")
     c.execute("SELECT crsql_as_crr('foo');")
     c.execute("INSERT INTO foo VALUES (1, 2, 3);")
     c.execute("INSERT INTO foo VALUES (4, 5, 6);")
@@ -528,7 +533,7 @@ def test_remove_col_from_pk():
 
     c.execute("SELECT crsql_begin_alter('foo');")
     c.execute(
-        "CREATE TABLE new_foo(a PRIMARY KEY, b, c);")
+        "CREATE TABLE new_foo(a PRIMARY KEY NOT NULL, b, c);")
     c.execute("INSERT INTO new_foo SELECT * FROM foo;")
     c.execute("DROP TABLE foo;")
     c.execute("ALTER TABLE new_foo RENAME TO foo;")
@@ -548,7 +553,7 @@ def test_remove_col_from_pk():
 # rather than just remove it from pk particiaption
 def test_remove_pk_column():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a, b, c, PRIMARY KEY (a, b));")
+    c.execute("CREATE TABLE foo (a NOT NULL, b NOT NULL, c, PRIMARY KEY (a, b));")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
 
@@ -558,7 +563,7 @@ def test_remove_pk_column():
 
     c.execute("SELECT crsql_begin_alter('foo');")
     c.execute(
-        "CREATE TABLE new_foo(b PRIMARY KEY, c);")
+        "CREATE TABLE new_foo(b PRIMARY KEY NOT NULL, c);")
     c.execute("INSERT INTO new_foo SELECT b, c FROM foo;")
     c.execute("DROP TABLE foo;")
     c.execute("ALTER TABLE new_foo RENAME TO foo;")
@@ -571,7 +576,7 @@ def test_remove_pk_column():
 
 def test_add_existing_col_to_pk():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a PRIMARY KEY, b, c);")
+    c.execute("CREATE TABLE foo (a PRIMARY KEY NOT NULL, b, c);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
 
@@ -581,7 +586,7 @@ def test_add_existing_col_to_pk():
 
     c.execute("SELECT crsql_begin_alter('foo');")
     c.execute(
-        "CREATE TABLE new_foo(a, b, c, PRIMARY KEY (a, b));")
+        "CREATE TABLE new_foo(a NOT NULL, b NOT NULL, c, PRIMARY KEY (a, b));")
     c.execute("INSERT INTO new_foo SELECT * FROM foo;")
     c.execute("DROP TABLE foo;")
     c.execute("ALTER TABLE new_foo RENAME TO foo;")
@@ -594,7 +599,7 @@ def test_add_existing_col_to_pk():
 
 def test_add_new_col_to_pk():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a PRIMARY KEY, b);")
+    c.execute("CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
 
@@ -604,7 +609,7 @@ def test_add_new_col_to_pk():
 
     c.execute("SELECT crsql_begin_alter('foo');")
     c.execute(
-        "CREATE TABLE new_foo(a, b, c, PRIMARY KEY (a, c));")
+        "CREATE TABLE new_foo(a NOT NULL, b, c NOT NULL, PRIMARY KEY (a, c));")
     c.execute("INSERT INTO new_foo SELECT a, b, b + 1 FROM foo;")
     c.execute("DROP TABLE foo;")
     c.execute("ALTER TABLE new_foo RENAME TO foo;")
@@ -624,7 +629,7 @@ def test_add_new_col_to_pk():
 # given the migration isn't causing _new rows_ for others...
 def test_rename_pk_column():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a PRIMARY KEY, b);")
+    c.execute("CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
 
@@ -633,7 +638,7 @@ def test_rename_pk_column():
     c.commit()
 
     c.execute("SELECT crsql_begin_alter('foo');")
-    c.execute("CREATE TABLE new_foo(c PRIMARY KEY, b)")
+    c.execute("CREATE TABLE new_foo(c PRIMARY KEY NOT NULL, b)")
     c.execute("INSERT INTO new_foo SELECT a, b FROM foo;")
     c.execute("DROP TABLE foo;")
     c.execute("ALTER TABLE new_foo RENAME TO foo;")
@@ -652,7 +657,7 @@ def test_pk_only_table_pk_membership():
 
 def test_changing_values_in_primary_key_columns():
     c = connect(":memory:")
-    c.execute("CREATE TABLE foo (a PRIMARY KEY, b);")
+    c.execute("CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);")
     c.execute("SELECT crsql_as_crr('foo');")
     c.commit()
 

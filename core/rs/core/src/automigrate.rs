@@ -9,7 +9,6 @@ use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int};
-use core::mem;
 use core::slice;
 use sqlite::ColumnType;
 use sqlite_nostd as sqlite;
@@ -116,7 +115,7 @@ fn migrate_to(
         AND name NOT LIKE 'sqlite_%'
         AND name NOT LIKE 'crsql_%'
         AND name NOT LIKE '__crsql_%'
-        AND name NOT LIKE '%__crsql_clock'";
+        AND name NOT LIKE '%__crsql_%'";
     let fetch_mem_tables = mem_db.prepare_v2(sql)?;
     let fetch_local_tables = local_db.prepare_v2(sql)?;
 
@@ -240,6 +239,10 @@ fn drop_columns(
     table: &str,
     columns: Vec<String>,
 ) -> Result<ResultCode, ResultCode> {
+    local_db.exec_safe(&format!(
+        "DROP VIEW IF EXISTS \"{table}_fractindex\"",
+        table = crate::util::escape_ident(table)
+    ))?;
     for col in columns {
         local_db.exec_safe(&format!(
             "ALTER TABLE \"{table}\" DROP \"{column}\"",
@@ -274,7 +277,7 @@ fn add_columns(
 
     let mut processed_cols = 0;
     while stmt.step()? == ResultCode::ROW {
-        let is_pk = stmt.column_int(4)? == 1;
+        let is_pk = stmt.column_int(4) == 1;
 
         if is_pk {
             // We do not support adding PK columns to existing tables in auto-migration
@@ -283,7 +286,7 @@ fn add_columns(
 
         let name = stmt.column_text(0)?;
         let col_type = stmt.column_text(1)?;
-        let notnull = stmt.column_int(2)? == 1;
+        let notnull = stmt.column_int(2) == 1;
         let dflt_val = stmt.column_value(3)?;
 
         add_column(local_db, table, name, col_type, notnull, dflt_val)?;
