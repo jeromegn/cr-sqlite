@@ -46,8 +46,8 @@ pub enum ChangeRowType {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
 #[allow(non_snake_case, non_camel_case_types)]
+#[derive(Debug, Copy, Clone)]
 pub struct crsql_ExtData {
     pub pPragmaSchemaVersionStmt: *mut sqlite::stmt,
     pub pPragmaDataVersionStmt: *mut sqlite::stmt,
@@ -67,6 +67,7 @@ pub struct crsql_ExtData {
     pub pSetSiteIdOrdinalStmt: *mut sqlite::stmt,
     pub pSelectSiteIdOrdinalStmt: *mut sqlite::stmt,
     pub pSelectClockTablesStmt: *mut sqlite::stmt,
+    pub mergeEqualValues: ::core::ffi::c_int,
 }
 
 #[repr(C)]
@@ -262,7 +263,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::core::mem::size_of::<crsql_ExtData>(),
-        128usize,
+        136usize,
         concat!("Size of: ", stringify!(crsql_ExtData))
     );
     assert_eq!(
@@ -450,6 +451,16 @@ fn bindgen_test_layout_crsql_ExtData() {
             stringify!(crsql_ExtData),
             "::",
             stringify!(pSelectClockTablesStmt)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).mergeEqualValues) as usize - ptr as usize },
+        128usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(crsql_ExtData),
+            "::",
+            stringify!(mergeEqualValues)
         )
     );
 }

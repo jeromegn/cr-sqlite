@@ -380,6 +380,26 @@ def test_merge_same():
     site_id = get_site_id(db2)
     assert (changes == [('foo', b'\x01\t\x01', 'b', 2, 1, 1, site_id, 1, 0)])
 
+def test_merge_same_w_tie_breaker():
+    db1 = create_basic_db()
+    db2 = create_basic_db()
+
+    db1.execute("INSERT INTO foo (a,b) VALUES (1,2);")
+    db1.execute("SELECT crsql_config_set('merge-equal-values', 1);")
+    db1.commit()
+
+    db2.execute("INSERT INTO foo (a,b) VALUES (1,2);")
+    db2.execute("SELECT crsql_config_set('merge-equal-values', 1);")
+    db2.commit()
+
+    sync_left_to_right(db1, db2, 0)
+    changes12 = db2.execute("SELECT \"table\", pk, cid, val, col_version, site_id FROM crsql_changes").fetchall()
+    
+    sync_left_to_right(db2, db1, 0)
+    changes21 = db1.execute("SELECT \"table\", pk, cid, val, col_version, site_id FROM crsql_changes").fetchall()
+
+    assert (changes12 == changes21)
+
 
 def test_merge_matching_clocks_lesser_value():
     def make_dbs():

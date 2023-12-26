@@ -18,6 +18,7 @@ mod changes_vtab;
 mod changes_vtab_read;
 mod changes_vtab_write;
 mod compare_values;
+mod config;
 mod consts;
 mod create_cl_set_vtab;
 mod create_crr;
@@ -53,6 +54,7 @@ use alter::crsql_compact_post_alter;
 use automigrate::*;
 use backfill::*;
 use c::{crsql_freeExtData, crsql_newExtData};
+use config::{crsql_config_get, crsql_config_set};
 use core::ffi::{c_int, c_void, CStr};
 use create_crr::create_crr;
 use db_version::{crsql_fill_db_version_if_needed, crsql_next_db_version};
@@ -212,7 +214,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
 
     let ext_data = unsafe { crsql_newExtData(db, site_id_buffer as *mut c_char) };
     if ext_data.is_null() {
-        sqlite::free(site_id_buffer as *mut c_void);
+        // no need to free the site id buffer here, this is cleaned up already.
         return null_mut();
     }
 
@@ -466,6 +468,40 @@ pub extern "C" fn sqlite3_crsqlcore_init(
             None,
         )
         .unwrap_or(ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        unsafe { crsql_freeExtData(ext_data) };
+        return null_mut();
+    }
+
+    let rc = db
+        .create_function_v2(
+            "crsql_config_set",
+            2,
+            sqlite::UTF8,
+            Some(ext_data as *mut c_void),
+            Some(crsql_config_set),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or(sqlite::ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        unsafe { crsql_freeExtData(ext_data) };
+        return null_mut();
+    }
+
+    let rc = db
+        .create_function_v2(
+            "crsql_config_get",
+            1,
+            sqlite::UTF8 | sqlite::INNOCUOUS | sqlite::DETERMINISTIC,
+            Some(ext_data as *mut c_void),
+            Some(crsql_config_get),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or(sqlite::ResultCode::ERROR);
     if rc != ResultCode::OK {
         unsafe { crsql_freeExtData(ext_data) };
         return null_mut();
