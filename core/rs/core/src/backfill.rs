@@ -1,6 +1,6 @@
 use sqlite_nostd::{sqlite3, Connection, Destructor, ManagedStmt, ResultCode};
 extern crate alloc;
-use crate::tableinfo::ColumnInfo;
+use crate::tableinfo::{ColumnInfo, TableInfo};
 use crate::util::get_dflt_value;
 use alloc::format;
 use alloc::string::String;
@@ -12,10 +12,12 @@ use sqlite_nostd as sqlite;
  */
 pub fn backfill_table(
     db: *mut sqlite3,
+    curr_table_info: Option<&TableInfo>,
     table: &str,
     pk_cols: &Vec<ColumnInfo>,
     non_pk_cols: &Vec<ColumnInfo>,
     is_commit_alter: bool,
+    pks_changed: bool,
     no_tx: bool,
 ) -> Result<ResultCode, ResultCode> {
     if !no_tx {
@@ -35,6 +37,7 @@ pub fn backfill_table(
     let stmt = db.prepare_v2(&sql);
 
     let non_pk_cols_refs = non_pk_cols.iter().collect::<Vec<_>>();
+    libc_print::libc_println!("creating clock rows");
     let result = match stmt {
         Ok(stmt) => create_clock_rows_from_stmt(
             stmt,
@@ -46,6 +49,7 @@ pub fn backfill_table(
         ),
         Err(e) => Err(e),
     };
+    libc_print::libc_println!("DONE creating clock rows");
 
     if let Err(e) = result {
         if !no_tx {
@@ -55,6 +59,7 @@ pub fn backfill_table(
         return Err(e);
     }
 
+    libc_print::libc_println!("backfilling missing columns");
     if let Err(e) = backfill_missing_columns(db, table, pk_cols, non_pk_cols, is_commit_alter) {
         if !no_tx {
             db.exec_safe("ROLLBACK")?;
@@ -62,6 +67,7 @@ pub fn backfill_table(
 
         return Err(e);
     }
+    libc_print::libc_println!("DONE backfilling missing columns");
 
     if !no_tx {
         db.exec_safe("RELEASE backfill")
@@ -184,7 +190,9 @@ fn backfill_missing_columns(
     is_commit_alter: bool,
 ) -> Result<ResultCode, ResultCode> {
     for non_pk_col in non_pk_cols {
+        libc_print::libc_println!("backfilling column {}", non_pk_col.name);
         fill_column(db, table, pk_cols, &non_pk_col, is_commit_alter)?;
+        libc_print::libc_println!("DONE backfilling column {}", non_pk_col.name);
     }
 
     Ok(ResultCode::OK)

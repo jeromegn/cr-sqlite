@@ -765,6 +765,7 @@ pub extern "C" fn crsql_ensure_table_infos_are_up_to_date(
     let mut table_infos = unsafe { Box::from_raw((*ext_data).tableInfos as *mut Vec<TableInfo>) };
 
     if schema_changed > 0 || table_infos.len() == 0 {
+        libc_print::libc_println!("schema changed, pulling tables");
         match pull_all_table_infos(db, ext_data, err) {
             Ok(new_table_infos) => {
                 *table_infos = new_table_infos;
@@ -855,14 +856,15 @@ pub fn pull_table_info(
             let mut cols: Vec<ColumnInfo> = vec![];
 
             while stmt.step()? == ResultCode::ROW {
-                cols.push(ColumnInfo {
+                let col = ColumnInfo {
                     name: stmt.column_text(1)?.to_string(),
                     cid: stmt.column_int(0),
                     pk: stmt.column_int(2),
                     curr_value_stmt: RefCell::new(None),
                     merge_insert_stmt: RefCell::new(None),
                     row_patch_data_stmt: RefCell::new(None),
-                });
+                };
+                cols.push(col);
             }
 
             if cols.len() != columns_len {
@@ -880,7 +882,7 @@ pub fn pull_table_info(
     let (mut pks, non_pks): (Vec<_>, Vec<_>) = column_infos.into_iter().partition(|x| x.pk > 0);
     pks.sort_by_key(|x| x.pk);
 
-    return Ok(TableInfo {
+    Ok(TableInfo {
         tbl_name: table.to_string(),
         pks,
         non_pks,
@@ -903,7 +905,7 @@ pub fn pull_table_info(
         mark_locally_created_stmt: RefCell::new(None),
         mark_locally_updated_stmt: RefCell::new(None),
         maybe_mark_locally_reinserted_stmt: RefCell::new(None),
-    });
+    })
 }
 
 pub fn is_table_compatible(

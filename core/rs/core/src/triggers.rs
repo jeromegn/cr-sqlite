@@ -9,6 +9,33 @@ use sqlite_nostd as sqlite;
 
 use crate::tableinfo::TableInfo;
 
+pub fn recreate_update_triggers(
+    db: *mut sqlite3,
+    table_info: &TableInfo,
+    err: *mut *mut c_char,
+) -> Result<ResultCode, ResultCode> {
+    db.exec_safe(&format!(
+        "DROP TRIGGER IF EXISTS \"{table}__crsql_utrig\"",
+        table = crate::util::escape_ident(&table_info.tbl_name)
+    ))?;
+
+    // get all columns of table
+    // iterate pk cols
+    // drop triggers against those pk cols
+    let stmt = db.prepare_v2("SELECT name FROM pragma_table_info(?) WHERE pk > 0")?;
+    stmt.bind_text(1, &table_info.tbl_name, sqlite::Destructor::STATIC)?;
+    while stmt.step()? == ResultCode::ROW {
+        let col_name = stmt.column_text(0)?;
+        db.exec_safe(&format!(
+            "DROP TRIGGER IF EXISTS \"{tbl_name}_{col_name}__crsql_utrig\"",
+            tbl_name = crate::util::escape_ident(&table_info.tbl_name),
+            col_name = crate::util::escape_ident(col_name),
+        ))?;
+    }
+
+    create_update_trigger(db, table_info, err)
+}
+
 pub fn create_triggers(
     db: *mut sqlite3,
     table_info: &TableInfo,

@@ -1,12 +1,16 @@
 extern crate alloc;
 
 use core::ffi::{c_char, c_int, c_void};
+use core::mem;
 
 use crate::alloc::borrow::ToOwned;
+use crate::c::crsql_Changes_vtab;
 use crate::create_crr::create_crr;
+use crate::tableinfo::TableInfo;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use sqlite::{sqlite3, Connection, CursorRef, StrRef, VTabArgs, VTabRef};
 use sqlite_nostd as sqlite;
 use sqlite_nostd::ResultCode;
@@ -69,7 +73,15 @@ fn create_impl(
     create_clset_storage(db, &vtab_args, err)?;
     let schema = vtab_args.database_name;
     let table = base_name_from_virtual_name(vtab_args.table_name);
-    create_crr(db, schema, table, false, true, err)
+
+    let tab = vtab.cast::<crsql_Changes_vtab>();
+    let table_infos = unsafe {
+        mem::ManuallyDrop::new(Box::from_raw(
+            (*(*tab).pExtData).tableInfos as *mut Vec<TableInfo>,
+        ))
+    };
+
+    create_crr(db, &table_infos, schema, table, false, true, err)
 }
 
 fn create_clset_storage(

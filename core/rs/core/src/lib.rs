@@ -50,6 +50,7 @@ use core::ffi::c_char;
 use core::mem;
 use core::ptr::null_mut;
 extern crate alloc;
+use alloc::boxed::Box;
 use alter::crsql_compact_post_alter;
 use automigrate::*;
 use backfill::*;
@@ -65,8 +66,11 @@ use local_writes::after_update::x_crsql_after_update;
 use sqlite::{Destructor, ResultCode};
 use sqlite_nostd as sqlite;
 use sqlite_nostd::{Connection, Context, Value};
-use tableinfo::is_table_compatible;
+use tableinfo::{
+    crsql_ensure_table_infos_are_up_to_date, is_table_compatible, pull_table_info, TableInfo,
+};
 use teardown::*;
+use triggers::recreate_update_triggers;
 
 pub extern "C" fn crsql_as_table(
     ctx: *mut sqlite::context,
@@ -567,8 +571,15 @@ unsafe extern "C" fn x_crsql_as_crr(
         ctx.result_error("failed to start as_crr savepoint");
         return;
     }
+
+    let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
+    let table_infos = mem::ManuallyDrop::new(Box::from_raw(
+        (*ext_data).tableInfos as *mut alloc::vec::Vec<TableInfo>,
+    ));
+
     let rc = crsql_create_crr(
         db,
+        &table_infos,
         schema_name.as_ptr() as *const c_char,
         table_name.as_ptr() as *const c_char,
         0,
@@ -650,34 +661,92 @@ unsafe extern "C" fn x_crsql_commit_alter(
     }
 
     let args = sqlite::args!(argc, argv);
-    let (schema_name, table_name) = if argc == 2 {
+    let (schema_name, table_name) = if argc >= 2 {
         (args[0].text(), args[1].text())
     } else {
         ("main", args[0].text())
     };
 
+    let non_destructive = if argc >= 3 { args[2].int() == 1 } else { false };
+
+    libc_print::libc_println!("non-destructive? {}", non_destructive);
+
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let mut err_msg = null_mut();
     let db = ctx.db_handle();
-    let rc = crsql_compact_post_alter(
-        db,
-        table_name.as_ptr() as *const c_char,
-        ext_data,
-        &mut err_msg as *mut _,
-    );
 
-    let rc = if rc == ResultCode::OK as c_int {
-        crsql_create_crr(
-            db,
-            schema_name.as_ptr() as *const c_char,
-            table_name.as_ptr() as *const c_char,
-            1,
-            0,
-            &mut err_msg as *mut _,
-        )
+    let rc = if non_destructive {
+        match pull_table_info(db, table_name, &mut err_msg as *mut _) {
+            Ok(table_info) => {
+                match recreate_update_triggers(db, &table_info, &mut err_msg as *mut _) {
+                    Ok(ResultCode::OK) => {
+                        // need to ensure the right table infos in ext data
+                        crsql_ensure_table_infos_are_up_to_date(
+                            db,
+                            ext_data,
+                            &mut err_msg as *mut _,
+                        )
+                    }
+                    Ok(rc) | Err(rc) => rc as c_int,
+                }
+            }
+            Err(rc) => rc as c_int,
+        }
+
+        // recreate_update_triggers(db, &table_info, &mut err_msg as *mut _)
+
+        // crsql_ensure_table_infos_are_up_to_date(db, ext_data, &mut err_msg as *mut _)
     } else {
-        rc
+        libc_print::libc_println!("compacting post alter");
+        let rc = crsql_compact_post_alter(
+            db,
+            table_name.as_ptr() as *const c_char,
+            ext_data,
+            &mut err_msg as *mut _,
+        );
+        libc_print::libc_println!("DONE compacting post alter");
+
+        if rc == ResultCode::OK as c_int {
+            let table_infos = mem::ManuallyDrop::new(Box::from_raw(
+                (*ext_data).tableInfos as *mut alloc::vec::Vec<TableInfo>,
+            ));
+            crsql_create_crr(
+                db,
+                &table_infos,
+                schema_name.as_ptr() as *const c_char,
+                table_name.as_ptr() as *const c_char,
+                1,
+                0,
+                &mut err_msg as *mut _,
+            )
+        } else {
+            rc
+        }
     };
+
+    // let rc = if rc == ResultCode::OK as c_int {
+    //     let table_infos = mem::ManuallyDrop::new(Box::from_raw(
+    //         (*ext_data).tableInfos as *mut alloc::vec::Vec<TableInfo>,
+    //     ));
+    //     crsql_create_crr(
+    //         db,
+    //         &table_infos,
+    //         schema_name.as_ptr() as *const c_char,
+    //         table_name.as_ptr() as *const c_char,
+    //         1,
+    //         0,
+    //         &mut err_msg as *mut _,
+    //     )
+    // } else {
+    //     rc
+    // };
+
+    // let rc = if non_destructive && rc == ResultCode::OK as c_int {
+    //     crsql_ensure_table_infos_are_up_to_date(db, ext_data, &mut err_msg as *mut _)
+    // } else {
+    //     rc
+    // };
+
     let rc = if rc == ResultCode::OK as c_int {
         db.exec_safe("RELEASE alter_crr")
             .unwrap_or(ResultCode::ERROR) as c_int
@@ -850,6 +919,7 @@ pub extern "C" fn crsql_is_table_compatible(
 #[no_mangle]
 pub extern "C" fn crsql_create_crr(
     db: *mut sqlite::sqlite3,
+    table_infos: &alloc::vec::Vec<TableInfo>,
     schema: *const c_char,
     table: *const c_char,
     is_commit_alter: c_int,
@@ -859,11 +929,28 @@ pub extern "C" fn crsql_create_crr(
     let schema = unsafe { CStr::from_ptr(schema).to_str() };
     let table = unsafe { CStr::from_ptr(table).to_str() };
 
-    return match (table, schema) {
-        (Ok(table), Ok(schema)) => {
-            create_crr(db, schema, table, is_commit_alter != 0, no_tx != 0, err)
-                .unwrap_or_else(|err| err) as c_int
-        }
+    match (table, schema) {
+        (Ok(table), Ok(schema)) => create_crr(
+            db,
+            table_infos,
+            schema,
+            table,
+            is_commit_alter != 0,
+            no_tx != 0,
+            err,
+        )
+        .unwrap_or_else(|err| err) as c_int,
         _ => ResultCode::NOMEM as c_int,
-    };
+    }
+}
+
+pub enum CommitAlter {
+    PossiblyDestructive,
+    NonDestructive,
+}
+
+impl CommitAlter {
+    pub fn is_destructive(&self) -> bool {
+        matches!(self, CommitAlter::PossiblyDestructive)
+    }
 }
