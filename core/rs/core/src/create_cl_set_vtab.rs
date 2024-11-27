@@ -74,14 +74,7 @@ fn create_impl(
     let schema = vtab_args.database_name;
     let table = base_name_from_virtual_name(vtab_args.table_name);
 
-    let tab = vtab.cast::<crsql_Changes_vtab>();
-    let table_infos = unsafe {
-        mem::ManuallyDrop::new(Box::from_raw(
-            (*(*tab).pExtData).tableInfos as *mut Vec<TableInfo>,
-        ))
-    };
-
-    create_crr(db, &table_infos, schema, table, false, true, err)
+    create_crr(db, schema, table, false, true, err)
 }
 
 fn create_clset_storage(

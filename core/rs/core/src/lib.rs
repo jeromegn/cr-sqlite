@@ -50,7 +50,6 @@ use core::ffi::c_char;
 use core::mem;
 use core::ptr::null_mut;
 extern crate alloc;
-use alloc::boxed::Box;
 use alter::crsql_compact_post_alter;
 use automigrate::*;
 use backfill::*;
@@ -66,9 +65,7 @@ use local_writes::after_update::x_crsql_after_update;
 use sqlite::{Destructor, ResultCode};
 use sqlite_nostd as sqlite;
 use sqlite_nostd::{Connection, Context, Value};
-use tableinfo::{
-    crsql_ensure_table_infos_are_up_to_date, is_table_compatible, pull_table_info, TableInfo,
-};
+use tableinfo::{crsql_ensure_table_infos_are_up_to_date, is_table_compatible, pull_table_info};
 use teardown::*;
 use triggers::recreate_update_triggers;
 
@@ -573,13 +570,9 @@ unsafe extern "C" fn x_crsql_as_crr(
     }
 
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
-    let table_infos = mem::ManuallyDrop::new(Box::from_raw(
-        (*ext_data).tableInfos as *mut alloc::vec::Vec<TableInfo>,
-    ));
 
     let rc = crsql_create_crr(
         db,
-        &table_infos,
         schema_name.as_ptr() as *const c_char,
         table_name.as_ptr() as *const c_char,
         0,
@@ -707,12 +700,8 @@ unsafe extern "C" fn x_crsql_commit_alter(
         libc_print::libc_println!("DONE compacting post alter");
 
         if rc == ResultCode::OK as c_int {
-            let table_infos = mem::ManuallyDrop::new(Box::from_raw(
-                (*ext_data).tableInfos as *mut alloc::vec::Vec<TableInfo>,
-            ));
             crsql_create_crr(
                 db,
-                &table_infos,
                 schema_name.as_ptr() as *const c_char,
                 table_name.as_ptr() as *const c_char,
                 1,
@@ -919,7 +908,6 @@ pub extern "C" fn crsql_is_table_compatible(
 #[no_mangle]
 pub extern "C" fn crsql_create_crr(
     db: *mut sqlite::sqlite3,
-    table_infos: &alloc::vec::Vec<TableInfo>,
     schema: *const c_char,
     table: *const c_char,
     is_commit_alter: c_int,
@@ -930,16 +918,10 @@ pub extern "C" fn crsql_create_crr(
     let table = unsafe { CStr::from_ptr(table).to_str() };
 
     match (table, schema) {
-        (Ok(table), Ok(schema)) => create_crr(
-            db,
-            table_infos,
-            schema,
-            table,
-            is_commit_alter != 0,
-            no_tx != 0,
-            err,
-        )
-        .unwrap_or_else(|err| err) as c_int,
+        (Ok(table), Ok(schema)) => {
+            create_crr(db, schema, table, is_commit_alter != 0, no_tx != 0, err)
+                .unwrap_or_else(|err| err) as c_int
+        }
         _ => ResultCode::NOMEM as c_int,
     }
 }
