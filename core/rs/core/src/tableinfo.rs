@@ -855,15 +855,14 @@ pub fn pull_table_info(
             let mut cols: Vec<ColumnInfo> = vec![];
 
             while stmt.step()? == ResultCode::ROW {
-                let col = ColumnInfo {
+                cols.push(ColumnInfo {
                     name: stmt.column_text(1)?.to_string(),
                     cid: stmt.column_int(0),
                     pk: stmt.column_int(2),
                     curr_value_stmt: RefCell::new(None),
                     merge_insert_stmt: RefCell::new(None),
                     row_patch_data_stmt: RefCell::new(None),
-                };
-                cols.push(col);
+                });
             }
 
             if cols.len() != columns_len {

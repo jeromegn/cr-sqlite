@@ -1,16 +1,12 @@
 extern crate alloc;
 
 use core::ffi::{c_char, c_int, c_void};
-use core::mem;
 
 use crate::alloc::borrow::ToOwned;
-use crate::c::crsql_Changes_vtab;
 use crate::create_crr::create_crr;
-use crate::tableinfo::TableInfo;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
-use alloc::vec::Vec;
 use sqlite::{sqlite3, Connection, CursorRef, StrRef, VTabArgs, VTabRef};
 use sqlite_nostd as sqlite;
 use sqlite_nostd::ResultCode;

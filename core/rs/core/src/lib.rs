@@ -569,8 +569,6 @@ unsafe extern "C" fn x_crsql_as_crr(
         return;
     }
 
-    let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
-
     let rc = crsql_create_crr(
         db,
         schema_name.as_ptr() as *const c_char,
