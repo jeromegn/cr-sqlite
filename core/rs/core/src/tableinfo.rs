@@ -765,7 +765,6 @@ pub extern "C" fn crsql_ensure_table_infos_are_up_to_date(
     let mut table_infos = unsafe { Box::from_raw((*ext_data).tableInfos as *mut Vec<TableInfo>) };
 
     if schema_changed > 0 || table_infos.len() == 0 {
-        libc_print::libc_println!("schema changed, pulling tables");
         match pull_all_table_infos(db, ext_data, err) {
             Ok(new_table_infos) => {
                 *table_infos = new_table_infos;

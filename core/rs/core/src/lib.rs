@@ -662,8 +662,6 @@ unsafe extern "C" fn x_crsql_commit_alter(
 
     let non_destructive = if argc >= 3 { args[2].int() == 1 } else { false };
 
-    libc_print::libc_println!("non-destructive? {}", non_destructive);
-
     let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
     let mut err_msg = null_mut();
     let db = ctx.db_handle();
@@ -685,19 +683,13 @@ unsafe extern "C" fn x_crsql_commit_alter(
             }
             Err(rc) => rc as c_int,
         }
-
-        // recreate_update_triggers(db, &table_info, &mut err_msg as *mut _)
-
-        // crsql_ensure_table_infos_are_up_to_date(db, ext_data, &mut err_msg as *mut _)
     } else {
-        libc_print::libc_println!("compacting post alter");
         let rc = crsql_compact_post_alter(
             db,
             table_name.as_ptr() as *const c_char,
             ext_data,
             &mut err_msg as *mut _,
         );
-        libc_print::libc_println!("DONE compacting post alter");
 
         if rc == ResultCode::OK as c_int {
             crsql_create_crr(
@@ -712,29 +704,6 @@ unsafe extern "C" fn x_crsql_commit_alter(
             rc
         }
     };
-
-    // let rc = if rc == ResultCode::OK as c_int {
-    //     let table_infos = mem::ManuallyDrop::new(Box::from_raw(
-    //         (*ext_data).tableInfos as *mut alloc::vec::Vec<TableInfo>,
-    //     ));
-    //     crsql_create_crr(
-    //         db,
-    //         &table_infos,
-    //         schema_name.as_ptr() as *const c_char,
-    //         table_name.as_ptr() as *const c_char,
-    //         1,
-    //         0,
-    //         &mut err_msg as *mut _,
-    //     )
-    // } else {
-    //     rc
-    // };
-
-    // let rc = if non_destructive && rc == ResultCode::OK as c_int {
-    //     crsql_ensure_table_infos_are_up_to_date(db, ext_data, &mut err_msg as *mut _)
-    // } else {
-    //     rc
-    // };
 
     let rc = if rc == ResultCode::OK as c_int {
         db.exec_safe("RELEASE alter_crr")

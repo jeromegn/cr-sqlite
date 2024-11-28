@@ -36,7 +36,6 @@ pub fn create_crr(
     remove_crr_triggers_if_exist(db, table)?;
     create_triggers(db, &table_info, err)?;
 
-    libc_print::libc_println!("backfilling table");
     backfill_table(
         db,
         table,
@@ -45,7 +44,6 @@ pub fn create_crr(
         is_commit_alter,
         no_tx,
     )?;
-    libc_print::libc_println!("DONE backfilling table");
 
     Ok(ResultCode::OK)
 }

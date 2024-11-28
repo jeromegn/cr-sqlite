@@ -184,9 +184,7 @@ fn backfill_missing_columns(
     is_commit_alter: bool,
 ) -> Result<ResultCode, ResultCode> {
     for non_pk_col in non_pk_cols {
-        libc_print::libc_println!("backfilling column {}", non_pk_col.name);
-        fill_column(db, table, pk_cols, &non_pk_col, is_commit_alter)?;
-        libc_print::libc_println!("DONE backfilling column {}", non_pk_col.name);
+        fill_column(db, table, pk_cols, non_pk_col, is_commit_alter)?;
     }
 
     Ok(ResultCode::OK)

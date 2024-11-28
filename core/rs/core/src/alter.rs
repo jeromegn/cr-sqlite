@@ -33,12 +33,10 @@ unsafe fn compact_post_alter(
     errmsg: *mut *mut c_char,
 ) -> Result<ResultCode, ResultCode> {
     let tbl_name_str = CStr::from_ptr(tbl_name).to_str()?;
-    libc_print::libc_println!("fill_db_version_if_needed");
     fill_db_version_if_needed(db, ext_data).or_else(|msg| {
         errmsg.set(&msg);
         Err(ResultCode::ERROR)
     })?;
-    libc_print::libc_println!("DONE fill_db_version_if_needed");
     let current_db_version = (*ext_data).dbVersion;
 
     // If primary key columns change (in the schema)
@@ -65,7 +63,6 @@ unsafe fn compact_post_alter(
     drop(stmt);
 
     if pk_diff > 0 {
-        libc_print::libc_println!("dropping table, pk diff > 0!");
         // drop the clock table so we can re-create it
         db.exec_safe(&format!(
             "DROP TABLE \"{table_name}__crsql_clock\";
@@ -85,9 +82,7 @@ unsafe fn compact_post_alter(
             tbl_name_val = crate::util::escape_ident_as_value(tbl_name_str),
             cl_sentinel = crate::c::DELETE_SENTINEL,
         );
-        libc_print::libc_println!("compacting entries without a column... {}", sql);
         db.exec_safe(&sql)?;
-        libc_print::libc_println!("DONE compacting entries without a column...");
 
         // Next delete entries that no longer have a row but keeping tombstones
         // TODO: if we move the sentinel metadata to the lookaside this becomes much simpler
@@ -133,9 +128,7 @@ unsafe fn compact_post_alter(
             tbl_name = crate::util::escape_ident(tbl_name_str)
           )
         );
-        libc_print::libc_println!("deleting entries no longer have rows {}", sql);
         db.exec_safe(&sql)?;
-        libc_print::libc_println!("DONE deleteing entries no longer have rows");
 
         // now delete pk lookasides that no longer map to anything in the clock tables
         let sql = format!(
@@ -144,9 +137,7 @@ unsafe fn compact_post_alter(
       )",
             tbl_name = crate::util::escape_ident(tbl_name_str),
         );
-        libc_print::libc_println!("deleting extra pk lookasides {}", sql);
         db.exec_safe(&sql)?;
-        libc_print::libc_println!("DONE deleting extra pk lookasides");
     }
 
     let stmt = db.prepare_v2(
