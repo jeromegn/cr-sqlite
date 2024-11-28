@@ -892,14 +892,3 @@ pub extern "C" fn crsql_create_crr(
         _ => ResultCode::NOMEM as c_int,
     }
 }
-
-pub enum CommitAlter {
-    PossiblyDestructive,
-    NonDestructive,
-}
-
-impl CommitAlter {
-    pub fn is_destructive(&self) -> bool {
-        matches!(self, CommitAlter::PossiblyDestructive)
-    }
-}
