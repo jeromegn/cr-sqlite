@@ -117,7 +117,7 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
 }
 
 void crsql_freeExtData(crsql_ExtData *pExtData) {
-  printf("free ext\n");
+  // printf("free ext\n");
   sqlite3_free(pExtData->siteId);
   sqlite3_finalize(pExtData->pDbVersionStmt);
   sqlite3_finalize(pExtData->pSiteVersionStmt);
@@ -129,7 +129,7 @@ void crsql_freeExtData(crsql_ExtData *pExtData) {
   sqlite3_finalize(pExtData->pSetSiteIdOrdinalStmt);
   sqlite3_finalize(pExtData->pSelectSiteIdOrdinalStmt);
   sqlite3_finalize(pExtData->pSelectClockTablesStmt);
-  printf("finalized statements\n");
+  // printf("finalized statements\n");
   pExtData->pDbVersionStmt = 0;
   pExtData->pSiteVersionStmt = 0;
   pExtData->pSetSiteVersionStmt = 0;
@@ -151,7 +151,7 @@ void crsql_freeExtData(crsql_ExtData *pExtData) {
 // see https://sqlite.org/forum/forumpost/c94f943821
 // `freeExtData` is called after finalization when the extension unloads
 void crsql_finalize(crsql_ExtData *pExtData) {
-  printf("crsql_finalize\n");
+  // printf("crsql_finalize\n");
   sqlite3_finalize(pExtData->pDbVersionStmt);
   sqlite3_finalize(pExtData->pSiteVersionStmt);
   sqlite3_finalize(pExtData->pSetSiteVersionStmt);

@@ -175,15 +175,15 @@ fn set_winner_clock(
     // get the returned ordinal
     // use that in place of insert_site_id in the metadata table(s)
 
-    libc_print::libc_println!("set winner clock! col_name = {}, col_vrsn = {}, db_vrsn = {}, site_id = {:?}, seq = {}, site_vrsn = {}", 
+    // libc_print::libc_println!("set winner clock! col_name = {}, col_vrsn = {}, db_vrsn = {}, site_id = {:?}, seq = {}, site_vrsn = {}",
 
-    insert_col_name,
-    insert_col_vrsn,
-    insert_db_vrsn,
-    insert_site_id,
-    insert_seq,
-    insert_site_vrsn,
-);
+    //     insert_col_name,
+    //     insert_col_vrsn,
+    //     insert_db_vrsn,
+    //     insert_site_id,
+    //     insert_seq,
+    //     insert_site_vrsn,
+    // );
 
     // on changes read, join to gather the proper site id.
     let ordinal = unsafe {
@@ -467,7 +467,7 @@ unsafe fn merge_insert(
     rowid: *mut sqlite::int64,
     errmsg: *mut *mut c_char,
 ) -> Result<ResultCode, ResultCode> {
-    libc_print::libc_println!("merge_insert");
+    // libc_print::libc_println!("merge_insert");
     let tab = vtab.cast::<crsql_Changes_vtab>();
     let db = (*tab).db;
 
@@ -504,7 +504,7 @@ unsafe fn merge_insert(
     let insert_seq = args[2 + CrsqlChangesColumn::Seq as usize].int64();
     let insert_site_vrsn = args[2 + CrsqlChangesColumn::SiteVrsn as usize].int64();
 
-    libc_print::libc_println!("insert site version = {}", insert_site_vrsn);
+    // libc_print::libc_println!("insert site version = {}", insert_site_vrsn);
 
     if insert_site_id.bytes() > crate::consts::SITE_ID_LEN {
         let err = CString::new("crsql - site id exceeded max length")?;
@@ -674,10 +674,10 @@ unsafe fn merge_insert(
     if !does_cid_win {
         // doesCidWin == 0? compared against our clocks, nothing wins. OK and
         // Done.
-        libc_print::libc_println!("CID did not win");
+        // libc_print::libc_println!("CID did not win");
         return Ok(ResultCode::OK);
     }
-    libc_print::libc_println!("remote won!");
+    // libc_print::libc_println!("remote won!");
 
     // TODO: this is all almost identical between all three merge cases!
     let merge_stmt_ref = tbl_info.get_merge_insert_stmt(db, insert_col)?;

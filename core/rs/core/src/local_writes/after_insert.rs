@@ -39,10 +39,10 @@ fn after_insert(
     tbl_info: &TableInfo,
     pks_new: &[*mut value],
 ) -> Result<ResultCode, String> {
-    libc_print::libc_println!("after_insert");
+    // libc_print::libc_println!("after_insert");
     let db_version = crate::db_version::next_db_version(db, ext_data, None)?;
     let site_version = crate::site_version::next_site_version(db, ext_data)?;
-    libc_print::libc_println!("next site version: {}", site_version);
+    // libc_print::libc_println!("next site version: {}", site_version);
     let (create_record_existed, key_new) = tbl_info
         .get_or_create_key_for_insert(db, pks_new)
         .map_err(|_| "failed geteting or creating lookaside key")?;

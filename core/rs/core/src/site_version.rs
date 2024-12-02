@@ -55,25 +55,25 @@ pub extern "C" fn crsql_fill_site_version_if_needed(
 pub fn next_site_version(db: *mut sqlite3, ext_data: *mut crsql_ExtData) -> Result<i64, String> {
     fill_site_version_if_needed(db, ext_data)?;
 
-    libc_print::libc_println!("got site_version = {}", unsafe { (*ext_data).siteVersion });
+    // libc_print::libc_println!("got site_version = {}", unsafe { (*ext_data).siteVersion });
 
     let ret = unsafe { (*ext_data).siteVersion + 1 };
-    libc_print::libc_println!("next site_version = {}", ret);
+    // libc_print::libc_println!("next site_version = {}", ret);
     unsafe {
         (*ext_data).pendingSiteVersion = ret;
 
         if (*ext_data).nextSiteVersionSet == 1 {
-            libc_print::libc_println!("already inserted in DB! returning.");
+            // libc_print::libc_println!("already inserted in DB! returning.");
             return Ok(ret);
         }
 
         let site_id_slice =
             core::slice::from_raw_parts((*ext_data).siteId, consts::SITE_ID_LEN as usize);
-        libc_print::libc_println!(
-            "next_site_version: setting into DB! {:?} => {}",
-            site_id_slice,
-            ret
-        );
+        // libc_print::libc_println!(
+        //     "next_site_version: setting into DB! {:?} => {}",
+        //     site_id_slice,
+        //     ret
+        // );
         // next site id is not set in the DB yet, do this now.
         (*ext_data)
             .pSetSiteVersionStmt
@@ -111,13 +111,13 @@ pub fn fill_site_version_if_needed(
         if rc == -1 {
             return Err("failed to fetch PRAGMA data_version".to_string());
         }
-        libc_print::libc_println!(
-            "fill_site_version_if_needed, currernt site version = {}, rc = {}",
-            (*ext_data).siteVersion,
-            rc
-        );
+        // libc_print::libc_println!(
+        //     "fill_site_version_if_needed, currernt site version = {}, rc = {}",
+        //     (*ext_data).siteVersion,
+        //     rc
+        // );
         if (*ext_data).siteVersion != -1 && rc == 0 {
-            libc_print::libc_println!("fill_site_version_if_needed: no need to fetch from storage");
+            // libc_print::libc_println!("fill_site_version_if_needed: no need to fetch from storage");
             return Ok(ResultCode::OK);
         }
         fetch_site_version_from_storage(db, ext_data)
@@ -128,13 +128,13 @@ pub fn fetch_site_version_from_storage(
     db: *mut sqlite3,
     ext_data: *mut crsql_ExtData,
 ) -> Result<ResultCode, String> {
-    libc_print::libc_println!("fetch_site_version_from_storage");
+    // libc_print::libc_println!("fetch_site_version_from_storage");
     unsafe {
         if (*ext_data).pSiteVersionStmt.is_null() {
-            libc_print::libc_println!("null site version stmt");
+            // libc_print::libc_println!("null site version stmt");
             match recreate_site_version_stmt(db, ext_data) {
                 Ok(ResultCode::DONE) => {
-                    libc_print::libc_println!("no clock tables means no site version!");
+                    // libc_print::libc_println!("no clock tables means no site version!");
                     // this means there are no clock tables / this is a clean db
                     (*ext_data).siteVersion = 0;
                     return Ok(ResultCode::OK);
@@ -149,7 +149,7 @@ pub fn fetch_site_version_from_storage(
         match rc {
             // no rows? We're a fresh db with the min starting version
             Ok(ResultCode::DONE) => {
-                libc_print::libc_println!("fetch_site_version_from_storage: no rows...");
+                // libc_print::libc_println!("fetch_site_version_from_storage: no rows...");
                 site_version_stmt
                     .reset()
                     .map_err(|rc| format!("failed to reset db version stmt after DONE: {}", rc))?;
@@ -158,7 +158,7 @@ pub fn fetch_site_version_from_storage(
             }
             // got a row? It is our db version.
             Ok(ResultCode::ROW) => {
-                libc_print::libc_println!("fetch_site_version_from_storage: got a row!");
+                // libc_print::libc_println!("fetch_site_version_from_storage: got a row!");
                 (*ext_data).siteVersion = site_version_stmt.column_int64(0);
                 site_version_stmt
                     .reset()

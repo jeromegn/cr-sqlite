@@ -324,14 +324,14 @@ unsafe fn changes_next(
     cursor: *mut crsql_Changes_cursor,
     vtab: *mut sqlite::vtab,
 ) -> Result<ResultCode, ResultCode> {
-    libc_print::libc_println!("chnages_next");
+    // libc_print::libc_println!("chnages_next");
     if (*cursor).pChangesStmt.is_null() {
         let err = CString::new("pChangesStmt is null in changes_next")?;
         (*vtab).zErrMsg = err.into_raw();
         return Err(ResultCode::ABORT);
     }
 
-    libc_print::libc_println!("chnages_next 2");
+    // libc_print::libc_println!("chnages_next 2");
 
     if !(*cursor).pRowStmt.is_null() {
         let rc = reset_cached_stmt((*cursor).pRowStmt);
@@ -339,7 +339,7 @@ unsafe fn changes_next(
         rc?;
     }
 
-    libc_print::libc_println!("chnages_next 3");
+    // libc_print::libc_println!("chnages_next 3");
 
     let rc = (*cursor).pChangesStmt.step()?;
     if rc == ResultCode::DONE {
@@ -350,7 +350,7 @@ unsafe fn changes_next(
             return Err(ResultCode::ERROR);
         }
     }
-    libc_print::libc_println!("chnages_next 4");
+    // libc_print::libc_println!("chnages_next 4");
 
     // we had a row... we can do the rest
     let tbl = (*cursor)
@@ -374,11 +374,11 @@ unsafe fn changes_next(
     (*cursor).dbVersion = db_version;
     (*cursor).siteVersion = site_version;
 
-    libc_print::libc_println!(
-        "db_version = {}, site_version = {}",
-        db_version,
-        site_version
-    );
+    // libc_print::libc_println!(
+    //     "db_version = {}, site_version = {}",
+    //     db_version,
+    //     site_version
+    // );
 
     let tbl_infos = mem::ManuallyDrop::new(Box::from_raw(
         (*(*(*cursor).pTab).pExtData).tableInfos as *mut Vec<TableInfo>,
@@ -466,7 +466,7 @@ fn column_impl(
     let column = CrsqlChangesColumn::from_i32(i);
     // TODO: only de-reference where needed?
     let changes_stmt = unsafe { (*cursor).pChangesStmt };
-    libc_print::libc_println!("getting column value for i = {} => {:?}", i, column);
+    // libc_print::libc_println!("getting column value for i = {} => {:?}", i, column);
     match column {
         Some(CrsqlChangesColumn::Tbl) => {
             ctx.result_value(changes_stmt.column_value(ClockUnionColumn::Tbl as i32));
@@ -544,7 +544,7 @@ pub extern "C" fn crsql_changes_update(
     argv: *mut *mut sqlite::value,
     row_id: *mut sqlite::int64,
 ) -> c_int {
-    libc_print::libc_println!("crsql_changes_update");
+    // libc_print::libc_println!("crsql_changes_update");
     let args = sqlite::args!(argc, argv);
     let arg = args[0];
     if args.len() > 1 && arg.value_type() == ColumnType::Null {
