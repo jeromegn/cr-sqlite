@@ -96,9 +96,6 @@ fn mark_new_pk_row_created(
         .and_then(|_| mark_locally_created_stmt.bind_int64(2, db_version))
         .and_then(|_| mark_locally_created_stmt.bind_int(3, seq))
         .and_then(|_| mark_locally_created_stmt.bind_int64(4, site_version))
-        .and_then(|_| mark_locally_created_stmt.bind_int64(5, db_version))
-        .and_then(|_| mark_locally_created_stmt.bind_int(6, seq))
-        .and_then(|_| mark_locally_created_stmt.bind_int64(7, site_version))
         .map_err(|_| "failed binding to mark_locally_created_stmt")?;
     step_trigger_stmt(mark_locally_created_stmt)
 }

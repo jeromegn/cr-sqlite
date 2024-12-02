@@ -75,17 +75,24 @@ pub fn next_site_version(db: *mut sqlite3, ext_data: *mut crsql_ExtData) -> Resu
             ret
         );
         // next site id is not set in the DB yet, do this now.
-        let stmt = (*ext_data).pSetSiteVersionStmt;
-        stmt.bind_blob(1, site_id_slice, sqlite_nostd::Destructor::STATIC)
-            .and_then(|_| stmt.bind_int64(2, ret))
+        (*ext_data)
+            .pSetSiteVersionStmt
+            .bind_blob(1, site_id_slice, sqlite_nostd::Destructor::STATIC)
+            .and_then(|_| (*ext_data).pSetSiteVersionStmt.bind_int64(2, ret))
             .map_err(|_| "failed binding to set_site_version_stmt")?;
 
-        stmt.step()
+        (*ext_data)
+            .pSetSiteVersionStmt
+            .step()
             .map_err(|_| "failed to insert site_version for current site ID")?;
 
-        stmt.clear_bindings()
+        (*ext_data)
+            .pSetSiteVersionStmt
+            .clear_bindings()
             .map_err(|_| "failed to clear_bindings for set_site_version_stmt")?;
-        stmt.reset()
+        (*ext_data)
+            .pSetSiteVersionStmt
+            .reset()
             .map_err(|_| "failed reset set_site_version_stmt")?;
 
         (*ext_data).nextSiteVersionSet = 1;

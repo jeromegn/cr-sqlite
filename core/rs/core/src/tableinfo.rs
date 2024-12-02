@@ -497,10 +497,10 @@ impl TableInfo {
                 ? WHERE true
                 ON CONFLICT DO UPDATE SET
                   col_version = CASE col_version % 2 WHEN 0 THEN col_version + 1 ELSE col_version + 2 END,
-                  db_version = ?,
-                  seq = ?,
+                  db_version = excluded.db_version,
+                  seq = excluded.seq,
                   site_id = 0,
-                  site_version = ?",
+                  site_version = excluded.site_version",
               table_name = crate::util::escape_ident(&self.tbl_name),
               sentinel = crate::c::INSERT_SENTINEL,
             );

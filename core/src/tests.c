@@ -9,7 +9,18 @@ SQLITE_EXTENSION_INIT3
 int crsql_close(sqlite3 *db) {
   int rc = SQLITE_OK;
   rc += sqlite3_exec(db, "SELECT crsql_finalize()", 0, 0, 0);
+  printf("finalize rc: %d\n", rc);
   rc += sqlite3_close(db);
+  printf("close rc: %d\n", rc);
+
+  sqlite3_stmt *next = NULL;
+  next = sqlite3_next_stmt(db, NULL);
+  if (next != NULL) {
+    const char *sql = NULL;
+    sql = sqlite3_expanded_sql(next);
+    printf("unfinalized sql: %s\n", sql);
+  }
+
   return rc;
 }
 

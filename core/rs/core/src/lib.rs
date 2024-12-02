@@ -289,7 +289,7 @@ pub extern "C" fn sqlite3_crsqlcore_init(
             Some(x_crsql_site_version),
             None,
             None,
-            Some(x_free_connection_ext_data),
+            None,
         )
         .unwrap_or(ResultCode::ERROR);
     if rc != ResultCode::OK {
