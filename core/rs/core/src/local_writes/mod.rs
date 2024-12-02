@@ -55,19 +55,19 @@ where
         }
     };
 
-    f(table_info, &values, ext_data)
+    f(table_info, values, ext_data)
 }
 
 fn step_trigger_stmt(stmt: &ManagedStmt) -> Result<ResultCode, String> {
     match stmt.step() {
         Ok(ResultCode::DONE) => {
             reset_cached_stmt(stmt.stmt)
-                .or_else(|_e| Err("done -- unable to reset cached trigger stmt"))?;
+                .map_err(|_e| "done -- unable to reset cached trigger stmt")?;
             Ok(ResultCode::OK)
         }
         Ok(code) | Err(code) => {
             reset_cached_stmt(stmt.stmt)
-                .or_else(|_e| Err("error -- unable to reset cached trigger stmt"))?;
+                .map_err(|_e| "error -- unable to reset cached trigger stmt")?;
             Err(format!(
                 "unexpected result code from tigger_stmt.step: {}",
                 code
@@ -82,10 +82,11 @@ fn mark_new_pk_row_created(
     key_new: sqlite::int64,
     db_version: i64,
     seq: i32,
+    site_version: i64,
 ) -> Result<ResultCode, String> {
     let mark_locally_created_stmt_ref = tbl_info
         .get_mark_locally_created_stmt(db)
-        .or_else(|_e| Err("failed to get mark_locally_created_stmt"))?;
+        .map_err(|_e| "failed to get mark_locally_created_stmt")?;
     let mark_locally_created_stmt = mark_locally_created_stmt_ref
         .as_ref()
         .ok_or("Failed to deref sentinel stmt")?;
@@ -94,9 +95,11 @@ fn mark_new_pk_row_created(
         .bind_int64(1, key_new)
         .and_then(|_| mark_locally_created_stmt.bind_int64(2, db_version))
         .and_then(|_| mark_locally_created_stmt.bind_int(3, seq))
-        .and_then(|_| mark_locally_created_stmt.bind_int64(4, db_version))
-        .and_then(|_| mark_locally_created_stmt.bind_int(5, seq))
-        .or_else(|_| Err("failed binding to mark_locally_created_stmt"))?;
+        .and_then(|_| mark_locally_created_stmt.bind_int64(4, site_version))
+        .and_then(|_| mark_locally_created_stmt.bind_int64(5, db_version))
+        .and_then(|_| mark_locally_created_stmt.bind_int(6, seq))
+        .and_then(|_| mark_locally_created_stmt.bind_int64(7, site_version))
+        .map_err(|_| "failed binding to mark_locally_created_stmt")?;
     step_trigger_stmt(mark_locally_created_stmt)
 }
 
@@ -115,10 +118,12 @@ fn mark_locally_updated(
     col_info: &ColumnInfo,
     db_version: sqlite::int64,
     seq: i32,
+    site_version: sqlite::int64,
 ) -> Result<ResultCode, String> {
+    libc_print::libc_println!("mark_locally_updated, site_version = {}", site_version);
     let mark_locally_updated_stmt_ref = tbl_info
         .get_mark_locally_updated_stmt(db)
-        .or_else(|_e| Err("failed to get mark_locally_updated_stmt"))?;
+        .map_err(|_e| "failed to get mark_locally_updated_stmt")?;
     let mark_locally_updated_stmt = mark_locally_updated_stmt_ref
         .as_ref()
         .ok_or("Failed to deref sentinel stmt")?;
@@ -130,8 +135,7 @@ fn mark_locally_updated(
         })
         .and_then(|_| mark_locally_updated_stmt.bind_int64(3, db_version))
         .and_then(|_| mark_locally_updated_stmt.bind_int(4, seq))
-        .and_then(|_| mark_locally_updated_stmt.bind_int64(5, db_version))
-        .and_then(|_| mark_locally_updated_stmt.bind_int(6, seq))
-        .or_else(|_| Err("failed binding to mark_locally_updated_stmt"))?;
+        .and_then(|_| mark_locally_updated_stmt.bind_int64(5, site_version))
+        .map_err(|_| "failed binding to mark_locally_updated_stmt")?;
     step_trigger_stmt(mark_locally_updated_stmt)
 }

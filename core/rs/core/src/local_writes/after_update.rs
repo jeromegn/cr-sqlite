@@ -71,17 +71,20 @@ fn after_update(
     non_pks_new: &[*mut value],
     non_pks_old: &[*mut value],
 ) -> Result<ResultCode, String> {
+    libc_print::libc_println!("after_update");
     let next_db_version = crate::db_version::next_db_version(db, ext_data, None)?;
+    let next_site_version = crate::site_version::next_site_version(db, ext_data)?;
+    libc_print::libc_println!("next site version: {}", next_site_version);
     let new_key = tbl_info
         .get_or_create_key_via_raw_values(db, pks_new)
-        .or_else(|_| Err("failed geteting or creating lookaside key"))?;
+        .map_err(|_| "failed geteting or creating lookaside key")?;
 
     // Changing a primary key column to a new value is the same thing as deleting the row
     // previously identified by the primary key.
     if crate::compare_values::any_value_changed(pks_new, pks_old)? {
         let old_key = tbl_info
             .get_or_create_key_via_raw_values(db, pks_old)
-            .or_else(|_| Err("failed geteting or creating lookaside key"))?;
+            .map_err(|_| "failed geteting or creating lookaside key")?;
         let next_seq = super::bump_seq(ext_data);
         // Record the delete of the row identified by the old primary keys
         after_update__mark_old_pk_row_deleted(db, tbl_info, old_key, next_db_version, next_seq)?;
@@ -93,7 +96,14 @@ fn after_update(
         // if db.changes64() == 0 { <-- an optimization if we can get to it. we'd need to know to increment causal length.
         // so we can get to this when CL is stored in the lookaside.
         let next_seq = super::bump_seq(ext_data);
-        super::mark_new_pk_row_created(db, tbl_info, new_key, next_db_version, next_seq)?;
+        super::mark_new_pk_row_created(
+            db,
+            tbl_info,
+            new_key,
+            next_db_version,
+            next_seq,
+            next_site_version,
+        )?;
         // }
     }
 
@@ -115,6 +125,7 @@ fn after_update(
                 col_info,
                 next_db_version,
                 next_seq,
+                next_site_version,
             )?;
         }
     }
@@ -141,7 +152,6 @@ fn after_update__mark_old_pk_row_deleted(
         .and_then(|_| mark_locally_deleted_stmt.bind_int64(2, db_version))
         .and_then(|_| mark_locally_deleted_stmt.bind_int(3, seq))
         .and_then(|_| mark_locally_deleted_stmt.bind_int64(4, db_version))
-        .and_then(|_| mark_locally_deleted_stmt.bind_int(5, seq))
         .or_else(|_| Err("failed binding to mark_locally_deleted_stmt"))?;
     super::step_trigger_stmt(mark_locally_deleted_stmt)
 }

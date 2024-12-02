@@ -39,15 +39,18 @@ fn after_delete(
     tbl_info: &TableInfo,
     pks_old: &[*mut value],
 ) -> Result<ResultCode, String> {
+    libc_print::libc_println!("after delete");
     let db_version = crate::db_version::next_db_version(db, ext_data, None)?;
+    let site_version = crate::site_version::next_site_version(db, ext_data)?;
+    libc_print::libc_println!("next site version: {}", site_version);
     let seq = bump_seq(ext_data);
     let key = tbl_info
         .get_or_create_key_via_raw_values(db, pks_old)
-        .or_else(|_| Err("failed geteting or creating lookaside key"))?;
+        .map_err(|_| "failed geteting or creating lookaside key")?;
 
     let mark_locally_deleted_stmt_ref = tbl_info
         .get_mark_locally_deleted_stmt(db)
-        .or_else(|_e| Err("failed to get mark_locally_deleted_stmt"))?;
+        .map_err(|_e| "failed to get mark_locally_deleted_stmt")?;
     let mark_locally_deleted_stmt = mark_locally_deleted_stmt_ref
         .as_ref()
         .ok_or("Failed to deref sentinel stmt")?;
@@ -55,21 +58,20 @@ fn after_delete(
         .bind_int64(1, key)
         .and_then(|_| mark_locally_deleted_stmt.bind_int64(2, db_version))
         .and_then(|_| mark_locally_deleted_stmt.bind_int(3, seq))
-        .and_then(|_| mark_locally_deleted_stmt.bind_int64(4, db_version))
-        .and_then(|_| mark_locally_deleted_stmt.bind_int(5, seq))
-        .or_else(|_| Err("failed binding to mark locally deleted stmt"))?;
+        .and_then(|_| mark_locally_deleted_stmt.bind_int64(4, site_version))
+        .map_err(|_| "failed binding to mark locally deleted stmt")?;
     super::step_trigger_stmt(mark_locally_deleted_stmt)?;
 
     // now actually delete the row metadata
     let drop_clocks_stmt_ref = tbl_info
         .get_merge_delete_drop_clocks_stmt(db)
-        .or_else(|_e| Err("failed to get mark_locally_deleted_stmt"))?;
+        .map_err(|_e| "failed to get mark_locally_deleted_stmt")?;
     let drop_clocks_stmt = drop_clocks_stmt_ref
         .as_ref()
         .ok_or("Failed to deref sentinel stmt")?;
 
     drop_clocks_stmt
         .bind_int64(1, key)
-        .or_else(|_e| Err("failed to bind pks to drop_clocks_stmt"))?;
+        .map_err(|_e| "failed to bind pks to drop_clocks_stmt")?;
     super::step_trigger_stmt(drop_clocks_stmt)
 }

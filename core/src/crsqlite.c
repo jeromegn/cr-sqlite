@@ -26,29 +26,8 @@ unsigned char __rust_no_alloc_shim_is_unstable;
 int crsql_compact_post_alter(sqlite3 *db, const char *tblName,
                              crsql_ExtData *pExtData, char **errmsg);
 
-static void freeConnectionExtData(void *pUserData) {
-  crsql_ExtData *pExtData = (crsql_ExtData *)pUserData;
-
-  crsql_freeExtData(pExtData);
-}
-
-static int commitHook(void *pUserData) {
-  crsql_ExtData *pExtData = (crsql_ExtData *)pUserData;
-
-  pExtData->dbVersion = pExtData->pendingDbVersion;
-  pExtData->pendingDbVersion = -1;
-  pExtData->seq = 0;
-  pExtData->updatedTableInfosThisTx = 0;
-  return SQLITE_OK;
-}
-
-static void rollbackHook(void *pUserData) {
-  crsql_ExtData *pExtData = (crsql_ExtData *)pUserData;
-
-  pExtData->pendingDbVersion = -1;
-  pExtData->seq = 0;
-  pExtData->updatedTableInfosThisTx = 0;
-}
+int crsql_commit_hook(void *pUserData);
+void crsql_rollback_hook(void *pUserData);
 
 #ifdef LIBSQL
 static void closeHook(void *pUserData, sqlite3 *db) {
@@ -97,8 +76,8 @@ __declspec(dllexport)
 #endif
     // TODO: get the prior callback so we can call it rather than replace
     // it?
-    sqlite3_commit_hook(db, commitHook, pExtData);
-    sqlite3_rollback_hook(db, rollbackHook, pExtData);
+    sqlite3_commit_hook(db, crsql_commit_hook, pExtData);
+    sqlite3_rollback_hook(db, crsql_rollback_hook, pExtData);
   }
 
   return rc;

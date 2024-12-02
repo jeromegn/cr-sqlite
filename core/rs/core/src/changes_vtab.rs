@@ -41,8 +41,9 @@ fn changes_crsr_finalize(crsr: *mut crsql_Changes_cursor) -> c_int {
         }
         (*crsr).pRowStmt = null_mut();
         (*crsr).dbVersion = crate::consts::MIN_POSSIBLE_DB_VERSION;
+        (*crsr).siteVersion = crate::consts::MIN_POSSIBLE_SITE_VERSION;
 
-        return rc;
+        rc
     }
 }
 
@@ -110,7 +111,7 @@ fn changes_best_index(
     let mut desc = 0;
     let order_bys = sqlite::args!((*index_info).nOrderBy, (*index_info).aOrderBy);
     let mut order_by_consumed = true;
-    if order_bys.len() > 0 {
+    if !order_bys.is_empty() {
         str.push_str(" ORDER BY ");
     } else {
         // The user didn't provide an ordering? Tack on a default one that will
@@ -134,7 +135,7 @@ fn changes_best_index(
         }
     }
 
-    if order_bys.len() > 0 {
+    if !order_bys.is_empty() {
         if desc != 0 {
             str.push_str(" DESC");
         } else {
@@ -160,14 +161,7 @@ fn changes_best_index(
             (*index_info).estimatedRows = 10;
         }
     }
-    // only the requestor constraint is present
-    else if idx_num & 4 == 4 {
-        unsafe {
-            (*index_info).estimatedCost = 2147483647.0;
-            (*index_info).estimatedRows = 2147483647;
-        }
-    }
-    // no constraints are present
+    // no constraints are present or only the requestor constraint is present
     else {
         unsafe {
             (*index_info).estimatedCost = 2147483647.0;
@@ -194,10 +188,10 @@ fn constraint_is_usable(constraint: &sqlite::index_constraint) -> bool {
         return false;
     }
     if let Some(col) = CrsqlChangesColumn::from_i32(constraint.iColumn) {
-        match col {
-            CrsqlChangesColumn::Tbl | CrsqlChangesColumn::Pk | CrsqlChangesColumn::Cval => false,
-            _ => true,
-        }
+        !matches!(
+            col,
+            CrsqlChangesColumn::Tbl | CrsqlChangesColumn::Pk | CrsqlChangesColumn::Cval
+        )
     } else {
         false
     }
@@ -215,6 +209,7 @@ fn get_clock_table_col_name(col: &Option<CrsqlChangesColumn>) -> Option<String> 
         Some(CrsqlChangesColumn::SiteId) => Some("site_id".to_string()),
         Some(CrsqlChangesColumn::Seq) => Some("seq".to_string()),
         Some(CrsqlChangesColumn::Cl) => Some("cl".to_string()),
+        Some(CrsqlChangesColumn::SiteVrsn) => Some("site_vrsn".to_string()),
         None => None,
     }
 }
@@ -329,19 +324,22 @@ unsafe fn changes_next(
     cursor: *mut crsql_Changes_cursor,
     vtab: *mut sqlite::vtab,
 ) -> Result<ResultCode, ResultCode> {
+    libc_print::libc_println!("chnages_next");
     if (*cursor).pChangesStmt.is_null() {
         let err = CString::new("pChangesStmt is null in changes_next")?;
         (*vtab).zErrMsg = err.into_raw();
         return Err(ResultCode::ABORT);
     }
 
+    libc_print::libc_println!("chnages_next 2");
+
     if !(*cursor).pRowStmt.is_null() {
         let rc = reset_cached_stmt((*cursor).pRowStmt);
         (*cursor).pRowStmt = null_mut();
-        if rc.is_err() {
-            return rc;
-        }
+        rc?;
     }
+
+    libc_print::libc_println!("chnages_next 3");
 
     let rc = (*cursor).pChangesStmt.step()?;
     if rc == ResultCode::DONE {
@@ -352,6 +350,7 @@ unsafe fn changes_next(
             return Err(ResultCode::ERROR);
         }
     }
+    libc_print::libc_println!("chnages_next 4");
 
     // we had a row... we can do the rest
     let tbl = (*cursor)
@@ -369,7 +368,17 @@ unsafe fn changes_next(
     let changes_rowid = (*cursor)
         .pChangesStmt
         .column_int64(ClockUnionColumn::RowId as i32);
+    let site_version = (*cursor)
+        .pChangesStmt
+        .column_int64(ClockUnionColumn::SiteVrsn as i32);
     (*cursor).dbVersion = db_version;
+    (*cursor).siteVersion = site_version;
+
+    libc_print::libc_println!(
+        "db_version = {}, site_version = {}",
+        db_version,
+        site_version
+    );
 
     let tbl_infos = mem::ManuallyDrop::new(Box::from_raw(
         (*(*(*cursor).pTab).pExtData).tableInfos as *mut Vec<TableInfo>,
@@ -389,7 +398,7 @@ unsafe fn changes_next(
     (*cursor).changesRowid = changes_rowid;
     (*cursor).tblInfoIdx = tbl_info_index as i32;
 
-    if tbl_info.pks.len() == 0 {
+    if tbl_info.pks.is_empty() {
         let err = CString::new(format!("crr {} is missing primary keys", tbl))?;
         (*vtab).zErrMsg = err.into_raw();
         return Err(ResultCode::ERROR);
@@ -431,9 +440,9 @@ unsafe fn changes_next(
 pub extern "C" fn crsql_changes_eof(cursor: *mut sqlite::vtab_cursor) -> c_int {
     let cursor = cursor.cast::<crsql_Changes_cursor>();
     if unsafe { (*cursor).pChangesStmt.is_null() } {
-        return 1;
+        1
     } else {
-        return 0;
+        0
     }
 }
 
@@ -457,6 +466,7 @@ fn column_impl(
     let column = CrsqlChangesColumn::from_i32(i);
     // TODO: only de-reference where needed?
     let changes_stmt = unsafe { (*cursor).pChangesStmt };
+    libc_print::libc_println!("getting column value for i = {} => {:?}", i, column);
     match column {
         Some(CrsqlChangesColumn::Tbl) => {
             ctx.result_value(changes_stmt.column_value(ClockUnionColumn::Tbl as i32));
@@ -503,6 +513,9 @@ fn column_impl(
         Some(CrsqlChangesColumn::Cl) => {
             ctx.result_value(changes_stmt.column_value(ClockUnionColumn::Cl as i32))
         }
+        Some(CrsqlChangesColumn::SiteVrsn) => {
+            ctx.result_value(changes_stmt.column_value(ClockUnionColumn::SiteVrsn as i32))
+        }
         None => return Err(ResultCode::MISUSE),
     }
 
@@ -521,7 +534,7 @@ pub extern "C" fn crsql_changes_rowid(
             return ResultCode::ERROR as c_int;
         }
     }
-    return ResultCode::OK as c_int;
+    ResultCode::OK as c_int
 }
 
 #[no_mangle]
@@ -531,6 +544,7 @@ pub extern "C" fn crsql_changes_update(
     argv: *mut *mut sqlite::value,
     row_id: *mut sqlite::int64,
 ) -> c_int {
+    libc_print::libc_println!("crsql_changes_update");
     let args = sqlite::args!(argc, argv);
     let arg = args[0];
     if args.len() > 1 && arg.value_type() == ColumnType::Null {
@@ -543,18 +557,16 @@ pub extern "C" fn crsql_changes_update(
                 (*vtab).zErrMsg = err_msg;
             }
         }
-        return rc;
-    } else {
-        if let Ok(err) = CString::new(
-            "Only INSERT and SELECT statements are allowed against the crsql changes table",
-        ) {
-            unsafe {
-                (*vtab).zErrMsg = err.into_raw();
-            }
-            return ResultCode::MISUSE as c_int;
-        } else {
-            return ResultCode::NOMEM as c_int;
+        rc
+    } else if let Ok(err) = CString::new(
+        "Only INSERT and SELECT statements are allowed against the crsql changes table",
+    ) {
+        unsafe {
+            (*vtab).zErrMsg = err.into_raw();
         }
+        ResultCode::MISUSE as c_int
+    } else {
+        ResultCode::NOMEM as c_int
     }
 }
 

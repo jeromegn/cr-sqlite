@@ -286,12 +286,13 @@ impl TableInfo {
         if self.set_winner_clock_stmt.try_borrow()?.is_none() {
             let sql = format!(
                 "INSERT OR REPLACE INTO \"{table_name}__crsql_clock\"
-              (key, col_name, col_version, db_version, seq, site_id)
+              (key, col_name, col_version, db_version, seq, site_id, site_version)
               VALUES (
                 ?,
                 ?,
                 ?,
                 crsql_next_db_version(?),
+                ?,
                 ?,
                 ?
               ) RETURNING key",
@@ -364,6 +365,7 @@ impl TableInfo {
                 pk_idents = crate::util::as_identifier_list(&self.pks, None)?,
                 pk_bindings = crate::util::binding_list(self.pks.len()),
             );
+            libc_print::libc_println!("pk-only-insert, sql = {}", sql);
             let ret = db.prepare_v3(&sql, sqlite::PREPARE_PERSISTENT)?;
             *self.merge_pk_only_insert_stmt.try_borrow_mut()? = Some(ret);
         }
@@ -430,19 +432,22 @@ impl TableInfo {
             col_version,
             db_version,
             seq,
-            site_id
+            site_id,
+            site_version
           ) SELECT
             ?,
             '{sentinel}',
             2,
             ?,
             ?,
-            0 WHERE true
+            0,
+            ? WHERE true
           ON CONFLICT DO UPDATE SET
             col_version = 1 + col_version,
-            db_version = ?,
-            seq = ?,
-            site_id = 0",
+            db_version = excluded.db_version,
+            seq = excluded.seq,
+            site_id = 0,
+            site_version = excluded.site_version",
                 table_name = crate::util::escape_ident(&self.tbl_name),
                 sentinel = crate::c::DELETE_SENTINEL,
             );
@@ -480,19 +485,22 @@ impl TableInfo {
                 col_version,
                 db_version,
                 seq,
-                site_id
+                site_id,
+                site_version
               ) SELECT
                 ?,
                 '{sentinel}',
                 1,
                 ?,
                 ?,
-                0 WHERE true
+                0,
+                ? WHERE true
                 ON CONFLICT DO UPDATE SET
                   col_version = CASE col_version % 2 WHEN 0 THEN col_version + 1 ELSE col_version + 2 END,
                   db_version = ?,
                   seq = ?,
-                  site_id = 0",
+                  site_id = 0,
+                  site_version = ?",
               table_name = crate::util::escape_ident(&self.tbl_name),
               sentinel = crate::c::INSERT_SENTINEL,
             );
@@ -514,19 +522,22 @@ impl TableInfo {
               col_version,
               db_version,
               seq,
-              site_id
+              site_id,
+              site_version
             ) SELECT
               ?,
               ?,
               1,
               ?,
               ?,
-              0 WHERE true
+              0,
+              ? WHERE true
             ON CONFLICT DO UPDATE SET
               col_version = col_version + 1,
-              db_version = ?,
-              seq = ?,
-              site_id = 0;",
+              db_version = excluded.db_version,
+              seq = excluded.seq,
+              site_id = 0,
+              site_version = excluded.site_version;",
                 table_name = crate::util::escape_ident(&self.tbl_name),
             );
             let ret = db.prepare_v3(&sql, sqlite::PREPARE_PERSISTENT)?;
@@ -549,7 +560,8 @@ impl TableInfo {
                 col_version = CASE col_version % 2 WHEN 0 THEN col_version + 1 ELSE col_version + 2 END,
                 db_version = ?,
                 seq = ?,
-                site_id = 0
+                site_id = 0,
+                site_version = ?
               WHERE key = ? AND col_name = ?",
               table_name = crate::util::escape_ident(&self.tbl_name),
             );
