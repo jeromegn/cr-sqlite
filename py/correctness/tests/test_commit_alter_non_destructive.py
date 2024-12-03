@@ -25,10 +25,7 @@ def test_commit_alter():
   c.commit()
   current_version = c.execute("SELECT crsql_db_version()").fetchone()[0]
   assert current_version == prev_version + 1
-  # pk present in table with new
-  pk = c.execute("SELECT DISTINCT pk FROM crsql_changes where db_version = {}".format(current_version)).fetchone()[0]
-  assert(pk == b'\x01\t\x02')
-  # new column in cid
+  # assert new changes in crsql_changes
   changes = c.execute("SELECT pk, cid, val FROM crsql_changes where db_version = {} ORDER BY cid".format(current_version)).fetchall()
   assert (changes == [(b'\x01\t\x02', 'owner', None),
                       (b'\x01\t\x02', 'title', 'another title')])
@@ -39,17 +36,17 @@ def test_commit_alter():
   c.commit()
   next_version = c.execute("SELECT crsql_db_version()").fetchone()[0]
   assert(next_version, current_version + 1)
-  next_change = c.execute("SELECT pk, cid, val, db_version FROM crsql_changes where db_version = {} ORDER BY cid".format(next_version)).fetchall()
+  next_change = c.execute("SELECT pk, cid, val FROM crsql_changes where db_version = {} ORDER BY cid".format(next_version)).fetchall()
   print("next version: {next_version}")
-  assert (next_change == [(b'\x01\t\x01', 'owner', 'new owner', next_version),
-                          (b'\x01\t\x01', 'title', 'update title', next_version)])
+  assert (next_change == [(b'\x01\t\x01', 'owner', 'new owner'),
+                          (b'\x01\t\x01', 'title', 'update title')])
 
   c.execute("INSERT INTO foo (id, title, owner) VALUES (3, 'third title', 'third owner')")
   c.commit()
   next_version = c.execute("SELECT crsql_db_version()").fetchone()[0]
-  next_change = c.execute("SELECT pk, cid, val, db_version FROM crsql_changes where db_version = {} ORDER BY cid".format(next_version)).fetchall()
-  assert (next_change == [(b'\x01\t\x03', 'owner', 'third owner', next_version),
-                          (b'\x01\t\x03', 'title', 'third title', next_version)])
+  next_change = c.execute("SELECT pk, cid, val FROM crsql_changes where db_version = {} ORDER BY cid".format(next_version)).fetchall()
+  assert (next_change == [(b'\x01\t\x03', 'owner', 'third owner'),
+                          (b'\x01\t\x03', 'title', 'third title')])
 
   c.execute("DELETE FROM foo where id = 3")
   c.commit()
