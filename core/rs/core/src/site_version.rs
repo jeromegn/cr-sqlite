@@ -3,6 +3,7 @@ use core::ptr;
 use crate::alloc::string::ToString;
 use crate::consts;
 use crate::consts::MIN_POSSIBLE_SITE_VERSION;
+use crate::stmt_cache::reset_cached_stmt;
 use alloc::format;
 use alloc::string::String;
 use core::ffi::{c_char, c_int};
@@ -75,25 +76,23 @@ pub fn next_site_version(db: *mut sqlite3, ext_data: *mut crsql_ExtData) -> Resu
         //     ret
         // );
         // next site id is not set in the DB yet, do this now.
-        (*ext_data)
+        let bind_result = (*ext_data)
             .pSetSiteVersionStmt
             .bind_blob(1, site_id_slice, sqlite_nostd::Destructor::STATIC)
-            .and_then(|_| (*ext_data).pSetSiteVersionStmt.bind_int64(2, ret))
-            .map_err(|_| "failed binding to set_site_version_stmt")?;
+            .and_then(|_| (*ext_data).pSetSiteVersionStmt.bind_int64(2, ret));
 
-        (*ext_data)
-            .pSetSiteVersionStmt
-            .step()
-            .map_err(|_| "failed to insert site_version for current site ID")?;
+        if bind_result.is_err() {
+            return Err("failed binding to set_site_version_stmt".into());
+        }
 
-        (*ext_data)
-            .pSetSiteVersionStmt
-            .clear_bindings()
-            .map_err(|_| "failed to clear_bindings for set_site_version_stmt")?;
-        (*ext_data)
-            .pSetSiteVersionStmt
-            .reset()
-            .map_err(|_| "failed reset set_site_version_stmt")?;
+        if (*ext_data).pSetSiteVersionStmt.step().is_err() {
+            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)
+                .map_err(|_| "failed to reset cached set_site_version_stmt")?;
+            return Err("failed to insert site_version for current site ID".into());
+        }
+
+        reset_cached_stmt((*ext_data).pSetSiteVersionStmt)
+            .map_err(|_| "failed to reset cached set_site_version_stmt")?;
 
         (*ext_data).nextSiteVersionSet = 1;
     }
