@@ -250,17 +250,38 @@ fn set_winner_clock(
         return Err(rc);
     }
 
-    match set_stmt.step() {
+    let rowid = match set_stmt.step() {
         Ok(ResultCode::ROW) => {
             let rowid = set_stmt.column_int64(0);
             reset_cached_stmt(set_stmt.stmt)?;
-            Ok(rowid)
+            rowid
         }
         _ => {
             reset_cached_stmt(set_stmt.stmt)?;
-            Err(ResultCode::ERROR)
+            return Err(ResultCode::ERROR);
         }
+    };
+
+    unsafe {
+        let bind_result = (*ext_data)
+            .pSetSiteVersionStmt
+            .bind_blob(1, insert_site_id, sqlite::Destructor::STATIC)
+            .and_then(|_| {
+                (*ext_data)
+                    .pSetSiteVersionStmt
+                    .bind_int64(2, insert_site_vrsn)
+            });
+        if let Err(rc) = bind_result {
+            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+            return Err(rc);
+        }
+        if let Err(rc) = (*ext_data).pSetSiteVersionStmt.step() {
+            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+            return Err(rc);
+        }
+        reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
     }
+    Ok(rowid)
 }
 
 fn merge_sentinel_only_insert(
