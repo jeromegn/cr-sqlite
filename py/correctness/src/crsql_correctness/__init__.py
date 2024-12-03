@@ -20,3 +20,4 @@ def get_site_id(c):
 
 
 min_db_v = 0
+min_site_v = 0
