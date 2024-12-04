@@ -15,13 +15,18 @@ def test_site_version_increments_on_modification():
     c.execute("insert into foo values (1, 2)")
     c.execute("commit")
     # +2 since create table statements bump version too
-    assert c.execute("SELECT crsql_site_version()").fetchone()[0] == min_site_v + 1
+    assert c.execute("SELECT crsql_site_version()").fetchone()[0] == 1
     c.execute("update foo set a = 3 where id = 1")
     c.execute("commit")
-    assert c.execute("SELECT crsql_site_version()").fetchone()[0] == min_site_v + 2
+    assert c.execute("SELECT crsql_site_version()").fetchone()[0] == 2
     c.execute("delete from foo where id = 1")
     c.execute("commit")
-    assert c.execute("SELECT crsql_site_version()").fetchone()[0] == min_site_v + 3
+    assert c.execute("SELECT crsql_site_version()").fetchone()[0] == 3
+
+    # check that crsql_site_versions is populated
+    site_id = get_site_id(c)
+    assert c.execute("SELECT site_id, version FROM crsql_site_versions").fetchall() == [(site_id, 3)]
+
     close(c)
 
 def test_site_version_restored_from_disk():
@@ -46,8 +51,15 @@ def test_site_version_restored_from_disk():
 
     # Close and reopen to check that version was persisted and re-initialized correctly
     close(c)
-    c = connect(dbfile)
+    c = connect('file:siteversion_c3.db?mode=ro', uri=True)
     assert c.execute("SELECT crsql_site_version()").fetchone()[0] == 1
+    close(c)
+
+    c = connect(dbfile)
+    # insert so we get a clock entry
+    c.execute("insert into foo values (2, 3)")
+    c.commit()
+    
     close(c)
 
 def test_each_tx_gets_a_site_version():
@@ -154,7 +166,12 @@ def test_overwriting_keeps_track_of_true_site_version():
 
     assert (changes == [('foo', b'\x01\t\x01', 'b', 3, 4, 4, db1_site_id, 1, 0, 3)])
 
-    assert db1.execute("SELECT * FROM crsql_site_versions").fetchall() == db2.execute("SELECT * FROM crsql_site_versions").fetchall()
+    site_versions_1 = db1.execute("SELECT * FROM crsql_site_versions").fetchall()
+    site_versions_2 = db2.execute("SELECT * FROM crsql_site_versions").fetchall()
+
+    assert site_versions_1 == [(db1_site_id, 3), (db2_site_id, 1)]
+
+    assert site_versions_1 == site_versions_2
 
     close(db1)
     close(db2)
