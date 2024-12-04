@@ -179,6 +179,7 @@ fn maybe_update_db_inner(
             _ = db.exec_safe("ROLLBACK");
             return Err(e);
         }
+        db.exec_safe("COMMIT")?;
     }
 
     // write the db version if we migrated to a new one or we are a blank slate db
@@ -231,23 +232,28 @@ pub fn create_clock_table(
     ))?;
 
     db.exec_safe(
-      &format!(
+        &format!(
         "CREATE INDEX IF NOT EXISTS \"{table_name}__crsql_clock_dbv_idx\" ON \"{table_name}__crsql_clock\" (\"db_version\")",
         table_name = crate::util::escape_ident(table_name),
-      ))?;
+        ))?;
     db.exec_safe(
-      &format!(
+        &format!(
+            "CREATE INDEX IF NOT EXISTS \"{table_name}__crsql_clock_sitev_idx\" ON \"{table_name}__crsql_clock\" (\"site_version\")",
+            table_name = crate::util::escape_ident(table_name),
+        ))?;
+    db.exec_safe(
+        &format!(
         "CREATE TABLE IF NOT EXISTS \"{table_name}__crsql_pks\" (__crsql_key INTEGER PRIMARY KEY, {pk_list})",
         table_name = table_name,
         pk_list = pk_list,
-      )
+        )
     )?;
     db.exec_safe(
-      &format!(
+        &format!(
         "CREATE UNIQUE INDEX IF NOT EXISTS \"{table_name}__crsql_pks_pks\" ON \"{table_name}__crsql_pks\" ({pk_list})",
         table_name = table_name,
         pk_list = pk_list
-      )
+        )
     )
 }
 
@@ -265,6 +271,10 @@ fn update_to_0_17_0(db: *mut sqlite3) -> Result<(), ResultCode> {
     for name in names {
         db.exec_safe(&format!(
             "ALTER TABLE {name} ADD COLUMN site_version INTEGER NOT NULL DEFAULT 0"
+        ))?;
+        db.exec_safe(&format!(
+            "CREATE INDEX IF NOT EXISTS \"{table_name}_sitev_idx\" ON \"{table_name}\" (\"site_version\")",
+            table_name = crate::util::escape_ident(name),
         ))?;
     }
 
