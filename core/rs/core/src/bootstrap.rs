@@ -1,3 +1,4 @@
+use alloc::string::ToString;
 use core::ffi::{c_char, c_int};
 
 use crate::{consts, tableinfo::TableInfo};
@@ -174,12 +175,11 @@ fn maybe_update_db_inner(
     // }
 
     if recorded_version < consts::CRSQLITE_VERSION_0_17_0 && !is_blank_slate {
-        db.exec_safe("BEGIN")?;
+        db.exec_safe("SAVEPOINT crsql_0_17_0")?;
         if let Err(e) = update_to_0_17_0(db) {
-            _ = db.exec_safe("ROLLBACK");
+            _ = db.exec_safe("RELEASE crsql_0_17_0");
             return Err(e);
         }
-        db.exec_safe("COMMIT")?;
     }
 
     // write the db version if we migrated to a new one or we are a blank slate db
@@ -265,7 +265,7 @@ fn update_to_0_17_0(db: *mut sqlite3) -> Result<(), ResultCode> {
     let mut names = alloc::vec::Vec::new();
 
     while stmt.step()? == ResultCode::ROW {
-        names.push(stmt.column_text(0)?);
+        names.push(stmt.column_text(0)?.to_string());
     }
 
     for name in names {
@@ -274,7 +274,7 @@ fn update_to_0_17_0(db: *mut sqlite3) -> Result<(), ResultCode> {
         ))?;
         db.exec_safe(&format!(
             "CREATE INDEX IF NOT EXISTS \"{table_name}_sitev_idx\" ON \"{table_name}\" (\"site_version\")",
-            table_name = crate::util::escape_ident(name),
+            table_name = crate::util::escape_ident(&name),
         ))?;
     }
 

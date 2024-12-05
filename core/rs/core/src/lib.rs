@@ -175,12 +175,10 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         return null_mut();
     }
 
-    // libc_print::libc_println!("creating site_versions table");
     let rc = crate::bootstrap::crsql_init_site_versions_table(db);
     if rc != ResultCode::OK as c_int {
         return null_mut();
     }
-    // libc_print::libc_println!("done creating site_versions");
 
     let sync_bit_ptr = sqlite::malloc(mem::size_of::<c_int>()) as *mut c_int;
     unsafe {
@@ -313,23 +311,6 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         unsafe { crsql_freeExtData(ext_data) };
         return null_mut();
     }
-
-    // let rc = db
-    //     .create_function_v2(
-    //         "crsql_version",
-    //         0,
-    //         sqlite::UTF8 | sqlite::INNOCUOUS | sqlite::DETERMINISTIC,
-    //         None,
-    //         Some(x_crsql_version),
-    //         None,
-    //         None,
-    //         None,
-    //     )
-    //     .unwrap_or(ResultCode::ERROR);
-    // if rc != ResultCode::OK {
-    //     unsafe { crsql_freeExtData(ext_data) };
-    //     return null_mut();
-    // }
 
     let rc = db
         .create_function_v2(
