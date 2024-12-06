@@ -1,3 +1,4 @@
+use alloc::string::ToString;
 use core::ffi::{c_char, c_int};
 
 use crate::{consts, tableinfo::TableInfo};
@@ -51,6 +52,14 @@ fn create_site_id_and_site_id_table(db: *mut sqlite3) -> Result<[u8; 16], Result
 #[no_mangle]
 pub extern "C" fn crsql_init_peer_tracking_table(db: *mut sqlite3) -> c_int {
     match db.exec_safe("CREATE TABLE IF NOT EXISTS crsql_tracked_peers (\"site_id\" BLOB NOT NULL, \"version\" INTEGER NOT NULL, \"seq\" INTEGER DEFAULT 0, \"tag\" INTEGER, \"event\" INTEGER, PRIMARY KEY (\"site_id\", \"tag\", \"event\")) STRICT;") {
+      Ok(_) => ResultCode::OK as c_int,
+      Err(code) => code as c_int
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn crsql_init_site_versions_table(db: *mut sqlite3) -> c_int {
+    match db.exec_safe("CREATE TABLE IF NOT EXISTS crsql_site_versions (\"site_id\" BLOB NOT NULL PRIMARY KEY, \"version\" INTEGER NOT NULL) STRICT;") {
       Ok(_) => ResultCode::OK as c_int,
       Err(code) => code as c_int
     }
@@ -157,13 +166,11 @@ fn maybe_update_db_inner(
         }
     }
 
-    // if recorded_version < consts::CRSQLITE_VERSION_0_13_0 {
-    //     update_to_0_13_0(db)?;
-    // }
-
-    // if recorded_version < consts::CRSQLITE_VERSION_0_15_0 {
-    //     update_to_0_15_0(db)?;
-    // }
+    if recorded_version < consts::CRSQLITE_VERSION_0_17_0 && !is_blank_slate {
+        if let Err(e) = update_to_0_17_0(db) {
+            return Err(e);
+        }
+    }
 
     // write the db version if we migrated to a new one or we are a blank slate db
     if recorded_version < consts::CRSQLITE_VERSION || is_blank_slate {
@@ -206,30 +213,60 @@ pub fn create_clock_table(
       col_name TEXT NOT NULL,
       col_version INTEGER NOT NULL,
       db_version INTEGER NOT NULL,
-      site_id INTEGER NOT NULL DEFAULT 0,
+      site_id INTEGER NOT NULL DEFAULT 0,  
       seq INTEGER NOT NULL,
+      site_version INTEGER NOT NULL,
       PRIMARY KEY (key, col_name)
     ) WITHOUT ROWID, STRICT",
         table_name = crate::util::escape_ident(table_name),
     ))?;
 
     db.exec_safe(
-      &format!(
+        &format!(
         "CREATE INDEX IF NOT EXISTS \"{table_name}__crsql_clock_dbv_idx\" ON \"{table_name}__crsql_clock\" (\"db_version\")",
         table_name = crate::util::escape_ident(table_name),
-      ))?;
+        ))?;
     db.exec_safe(
-      &format!(
+        &format!(
+            "CREATE INDEX IF NOT EXISTS \"{table_name}__crsql_clock_sitev_idx\" ON \"{table_name}__crsql_clock\" (\"site_version\")",
+            table_name = crate::util::escape_ident(table_name),
+        ))?;
+    db.exec_safe(
+        &format!(
         "CREATE TABLE IF NOT EXISTS \"{table_name}__crsql_pks\" (__crsql_key INTEGER PRIMARY KEY, {pk_list})",
         table_name = table_name,
         pk_list = pk_list,
-      )
+        )
     )?;
     db.exec_safe(
-      &format!(
+        &format!(
         "CREATE UNIQUE INDEX IF NOT EXISTS \"{table_name}__crsql_pks_pks\" ON \"{table_name}__crsql_pks\" ({pk_list})",
         table_name = table_name,
         pk_list = pk_list
-      )
+        )
     )
+}
+
+fn update_to_0_17_0(db: *mut sqlite3) -> Result<(), ResultCode> {
+    let stmt = db.prepare_v2(
+        "SELECT tbl_name FROM sqlite_master WHERE type = 'table' AND tbl_name LIKE '%__crsql_clock'",
+    )?;
+
+    let mut names = alloc::vec::Vec::new();
+
+    while stmt.step()? == ResultCode::ROW {
+        names.push(stmt.column_text(0)?.to_string());
+    }
+
+    for name in names {
+        db.exec_safe(&format!(
+            "ALTER TABLE {name} ADD COLUMN site_version INTEGER NOT NULL DEFAULT 0"
+        ))?;
+        db.exec_safe(&format!(
+            "CREATE INDEX IF NOT EXISTS \"{table_name}_sitev_idx\" ON \"{table_name}\" (\"site_version\")",
+            table_name = crate::util::escape_ident(&name),
+        ))?;
+    }
+
+    Ok(())
 }

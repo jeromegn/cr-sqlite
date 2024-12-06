@@ -2,7 +2,7 @@ from crsql_correctness import connect, close, get_site_id, min_db_v
 from pprint import pprint
 import random
 import pytest
-from hypothesis import given, settings, example, HealthCheck
+from hypothesis import given, settings, example, HealthCheck, Verbosity, Phase
 from hypothesis.strategies import integers, data, booleans, integers, text, floats, uuids, characters, composite
 from functools import reduce
 import uuid
@@ -41,7 +41,7 @@ def sync_left_to_right(l, r, since):
         "SELECT * FROM crsql_changes WHERE db_version > ?", (since,))
     for change in changes:
         r.execute(
-            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
+            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
     r.commit()
 
 
@@ -50,16 +50,16 @@ def sync_left_to_right_exact_version(l, r, db_version):
         "SELECT * FROM crsql_changes WHERE db_version = ?", (db_version,))
     for change in changes:
         r.execute(
-            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
+            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
     r.commit()
 
 
 def sync_left_to_right_include_siteid(l, r, since):
     changes = l.execute(
-        "SELECT [table], pk, cid, val, col_version, db_version, site_id, cl, seq FROM crsql_changes WHERE db_version > ?", (since,))
+        "SELECT [table], pk, cid, val, col_version, db_version, site_id, cl, seq, site_version FROM crsql_changes WHERE db_version > ?", (since,))
     for change in changes:
         r.execute(
-            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
+            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
     r.commit()
 
 
@@ -69,13 +69,13 @@ def sync_left_to_right_include_siteid(l, r, since):
 def sync_left_to_right_normal_delta_state(l, r, since):
     r_siteid = r.execute("SELECT crsql_site_id()").fetchone()[0]
     changes = l.execute(
-        "SELECT [table], pk, cid, val, col_version, db_version, site_id, cl, seq FROM crsql_changes WHERE db_version > ? AND site_id IS NOT ?",
+        "SELECT [table], pk, cid, val, col_version, db_version, site_id, cl, seq, site_version FROM crsql_changes WHERE db_version > ? AND site_id IS NOT ?",
         (since, r_siteid))
     largest_version = 0
     for change in changes:
         max(largest_version, change[5])
         r.execute(
-            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
+            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
     r.commit()
     return largest_version
 
@@ -83,11 +83,12 @@ def sync_left_to_right_normal_delta_state(l, r, since):
 def sync_left_to_right_single_vrsn(l, r, vrsn):
     r_siteid = r.execute("SELECT crsql_site_id()").fetchone()[0]
     changes = l.execute(
-        "SELECT [table], pk, cid, val, col_version, db_version, site_id, cl, seq FROM crsql_changes WHERE db_version = ? AND site_id IS NOT ?",
+        "SELECT [table], pk, cid, val, col_version, db_version, site_id, cl, seq, site_version FROM crsql_changes WHERE db_version = ? AND site_id IS NOT ?",
         (vrsn, r_siteid))
     for change in changes:
+        print("syncing single change ", change)
         r.execute(
-            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
+            "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", change)
     r.commit()
 
 
@@ -158,10 +159,10 @@ def test_larger_cl_delete_deletes_all():
     c1_site_id = get_site_id(c1)
     # c1 shouldn't have column metadata but only a delete record of the dropped item whose causal length should be 2.
     assert (c1_changes == [
-            ('foo', b'\x01\t\x01', '-1', None, 2, 1, c1_site_id, 2, 1)])
+            ('foo', b'\x01\t\x01', '-1', None, 2, 1, c1_site_id, 2, 1, 1)])
     # c2 merged in the delete thus bumping causal length to 2 and bumping db version since there was a change.
     assert (c2_changes == [
-            ('foo', b'\x01\t\x01', '-1', None, 2, 2, c1_site_id, 2, 1)])
+            ('foo', b'\x01\t\x01', '-1', None, 2, 2, c1_site_id, 2, 1, 1)])
     close(c1)
     close(c2)
 
@@ -183,7 +184,7 @@ def test_smaller_delete_does_not_delete_larger_cl():
     c1_site_id = get_site_id(c1)
     c1_changes = c1.execute("SELECT * FROM crsql_changes").fetchall()
     assert (c1_changes == [
-            ('foo', b'\x01\t\x01', '-1', None, 2, 1, c1_site_id, 2, 1)])
+            ('foo', b'\x01\t\x01', '-1', None, 2, 1, c1_site_id, 2, 1, 1)])
 
     c2_changes_pre_merge = c2.execute("SELECT * FROM crsql_changes").fetchall()
 
@@ -214,7 +215,7 @@ def test_equivalent_delete_cls_is_noop():
     # create a manual clock entry that wouldn't normally exist
     # this clock entry would be removed if the merge does any work rather than bailing early
     c2.execute(
-        "INSERT INTO foo__crsql_clock VALUES (1, 'b', 3, 1, 0, 1)")
+        "INSERT INTO foo__crsql_clock VALUES (1, 'b', 3, 1, 0, 1, 1)")
     c2.commit()
     pre_changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
     sync_left_to_right(c1, c2, 0)
@@ -278,8 +279,8 @@ def test_pr_299_scenario():
     # c2 should have accepted all the changes given the higher causal length
     # a = 1, b = 1, cl = 3
     c1_site_id = get_site_id(c1)
-    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 3, c1_site_id, 3, 0),
-                        ('foo', b'\x01\t\x01', 'b', 1, 1, 3, c1_site_id, 3, 1)])
+    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 3, c1_site_id, 3, 0, 3),
+                        ('foo', b'\x01\t\x01', 'b', 1, 1, 3, c1_site_id, 3, 1, 3)])
     # c2 and c1 should match in terms of data
     assert (c1.execute("SELECT * FROM foo").fetchall() ==
             c2.execute("SELECT * FROM foo").fetchall())
@@ -314,7 +315,8 @@ def test_sync_with_siteid():
                          1,
                          c1_site_id,
                          1,
-                         0)])
+                         0,
+                         1)])
 
     c1.execute("UPDATE foo SET b = 2 WHERE a = 1")
     c1.commit()
@@ -328,7 +330,8 @@ def test_sync_with_siteid():
                          2,
                          c1_site_id,
                          1,
-                         0)])
+                         0,
+                         2)])
 
     c1.execute("DELETE FROM foo WHERE a = 1")
     c1.commit()
@@ -342,7 +345,8 @@ def test_sync_with_siteid():
                          3,
                          c1_site_id,
                          2,
-                         0)])
+                         0,
+                         3)])
 
     c1.execute("INSERT INTO foo VALUES (1, 5)")
     c1.commit()
@@ -356,7 +360,8 @@ def test_sync_with_siteid():
                          4,
                          c1_site_id,
                          3,
-                         0),
+                         0,
+                         4),
                         ('foo',
                         b'\x01\t\x01',
                          'b',
@@ -365,7 +370,8 @@ def test_sync_with_siteid():
                          4,
                          c1_site_id,
                          3,
-                         1)])
+                         1,
+                         4)])
     close(c1)
     close(c2)
 
@@ -388,7 +394,7 @@ def test_resurrection_of_live_thing_via_sentinel():
     sentinel_resurrect = c1.execute(
         "SELECT * FROM crsql_changes WHERE cid = '-1'").fetchone()
     c2.execute(
-        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_resurrect)
+        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_resurrect)
     c2.commit()
 
     changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
@@ -396,17 +402,17 @@ def test_resurrection_of_live_thing_via_sentinel():
     # 'b' should be zeroed column version but latest db version.
     c2_site_id = get_site_id(c2)
     c1_site_id = get_site_id(c1)
-    assert (changes == [('foo', b'\x01\t\x01', 'b', 1, 0, 2, c2_site_id, 3, 0),
-                        ('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 2)])
+    assert (changes == [('foo', b'\x01\t\x01', 'b', 1, 0, 2, c2_site_id, 3, 0, 1),
+                        ('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 2, 1)])
     # now lets finish getting changes from the other node
     changes = c1.execute(
         "SELECT * FROM crsql_changes WHERE cid != '-1'").fetchone()
     c2.execute(
-        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", changes)
+        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", changes)
     c2.commit()
 
     changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
-    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 2),
+    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 2, 1),
                         # col version bump to 1 since the other guy won on col version.
                         # db version bumped as well since the col version changed.
                         # holding the db version stable would prevent nodes that proxy other nodes
@@ -417,7 +423,7 @@ def test_resurrection_of_live_thing_via_sentinel():
                         # Then B receives changes from A which move B's clock forward w/o changing B's value
                         # C then merges to B and loses there
                         # If B db version didn't change then C would never get the changes that B is proxying from A
-                        ('foo', b'\x01\t\x01', 'b', 1, 1, 3, c1_site_id, 3, 3)])
+                        ('foo', b'\x01\t\x01', 'b', 1, 1, 3, c1_site_id, 3, 3, 1)])
     close(c1)
     close(c2)
 
@@ -437,7 +443,7 @@ def test_resurrection_of_live_thing_via_non_sentinel():
     non_sentinel_resurrect = c1.execute(
         "SELECT * FROM crsql_changes WHERE cid != '-1'").fetchone()
     c2.execute(
-        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", non_sentinel_resurrect)
+        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", non_sentinel_resurrect)
     c2.commit()
 
     changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
@@ -445,8 +451,8 @@ def test_resurrection_of_live_thing_via_non_sentinel():
     # db version pushed
     # col version is at 1 given we rolled the causal length forward for the resurrection
     c1_site_id = get_site_id(c1)
-    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 3),
-                        ('foo', b'\x01\t\x01', 'b', 1, 1, 2, c1_site_id, 3, 3)])
+    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 3, 1),
+                        ('foo', b'\x01\t\x01', 'b', 1, 1, 2, c1_site_id, 3, 3, 1)])
 
     # sync all other entries should be a no-op
     sync_left_to_right(c1, c2, 0)
@@ -472,7 +478,7 @@ def test_resurrection_of_dead_thing_via_sentinel():
     sentinel_resurrect = c1.execute(
         "SELECT * FROM crsql_changes WHERE cid = '-1'").fetchone()
     c2.execute(
-        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_resurrect)
+        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_resurrect)
     c2.commit()
 
     changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
@@ -481,7 +487,7 @@ def test_resurrection_of_dead_thing_via_sentinel():
     # cl = 3 given resurrected from dead (2)
     # db_version = 2 given it was a change
     assert (changes == [('foo', b'\x01\t\x01',
-            '-1', None, 3, 2, c1_site_id, 3, 2)])
+            '-1', None, 3, 2, c1_site_id, 3, 2, 1)])
     close(c1)
     close(c2)
 
@@ -502,7 +508,7 @@ def test_resurrection_of_dead_thing_via_non_sentinel():
     sentinel_resurrect = c1.execute(
         "SELECT * FROM crsql_changes WHERE cid != '-1'").fetchone()
     c2.execute(
-        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_resurrect)
+        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_resurrect)
     c2.commit()
 
     changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
@@ -511,8 +517,8 @@ def test_resurrection_of_dead_thing_via_non_sentinel():
     # db_version = 2 given it was a change
     # col version rolled back given cl moved forward
     c1_site_id = get_site_id(c1)
-    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 3),
-                        ('foo', b'\x01\t\x01', 'b', 1, 1, 2, c1_site_id, 3, 3)])
+    assert (changes == [('foo', b'\x01\t\x01', '-1', None, 3, 2, c1_site_id, 3, 3, 1),
+                        ('foo', b'\x01\t\x01', 'b', 1, 1, 2, c1_site_id, 3, 3, 1)])
     close(c1)
     close(c2)
 
@@ -551,13 +557,13 @@ def test_delete_via_sentinel():
     sentinel_delete = c1.execute(
         "SELECT * FROM crsql_changes WHERE cid = '-1'").fetchone()
     c2.execute(
-        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_delete)
+        "INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", sentinel_delete)
     c2.commit()
 
     changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
     c1_site_id = get_site_id(c1)
     assert (changes == [('foo', b'\x01\t\x01',
-            '-1', None, 2, 2, c1_site_id, 2, 0)])
+            '-1', None, 2, 2, c1_site_id, 2, 0, 2)])
     close(c1)
     close(c2)
 
@@ -608,6 +614,7 @@ COLUMN_NAMES = (
 
 @composite
 def random_rows(draw):
+    print("randomizing rows...")
     def create_column_data(which_columns):
         return tuple(None if c == False else draw(COLUMN_TYPES[i]) for i, c in enumerate(which_columns))
 
@@ -685,6 +692,7 @@ def create_hypothesis_schema(c):
     c.execute(
         "CREATE TABLE item (id PRIMARY KEY NOT NULL, width INTEGER, height INTEGER, name TEXT, description TEXT, weight INTEGER)")
     c.execute("SELECT crsql_as_crr('item')")
+    c.commit()
 
 
 # Merge order should not matter. Once all events in the system
@@ -696,10 +704,12 @@ def test_out_of_order_merge(script, seed):
     steps = script
     c1 = connect(":memory:")
     c2 = connect(":memory:")
+    print("hello")
     create_hypothesis_schema(c1)
     create_hypothesis_schema(c2)
 
     for step in steps:
+        print("running a step")
         run_step(c1, step)
 
     sync_randomly(c1, c2, seed)
@@ -728,9 +738,10 @@ def sync_randomly(l, r, seed):
 # Check state at the end
 
 
-@settings(deadline=None)
+@settings(verbosity=Verbosity.verbose)
 @given(random_rows(), random_rows(), integers())
 def test_out_of_order_merge_bidi(c1_script, c2_script, seed):
+    print("hello bidi")
     c1 = connect(":memory:")
     c2 = connect(":memory:")
     create_hypothesis_schema(c1)
@@ -761,7 +772,7 @@ def test_out_of_order_merge_bidi(c1_script, c2_script, seed):
 # We should do `changes_since` style merging for this.
 # A -> B -> C
 # Merge
-@settings(deadline=None)
+@settings(deadline=None, phases=[Phase.explicit, Phase.reuse, Phase.generate, Phase.target])
 @given(random_rows(), random_rows())
 def test_ordered_delta_merge_proxy(a_script, c_script):
     # There are many edge cases that, if not handled properly, can lead to changes
@@ -910,7 +921,7 @@ def test_pko_resurrect():
     changes = c2.execute("SELECT * FROM crsql_changes").fetchall()
     c1_site_id = get_site_id(c1)
     assert (changes == [('foo', b'\x01\t\x01',
-            '-1', None, 3, 3, c1_site_id, 3, 0)])
+            '-1', None, 3, 3, c1_site_id, 3, 0, 3)])
 
     close(c1)
     close(c2)

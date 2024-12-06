@@ -17,6 +17,7 @@ mod c;
 mod changes_vtab;
 mod changes_vtab_read;
 mod changes_vtab_write;
+mod commit;
 mod compare_values;
 mod config;
 mod consts;
@@ -34,6 +35,7 @@ pub mod pack_columns;
 #[cfg(not(feature = "test"))]
 mod pack_columns;
 mod sha;
+mod site_version;
 mod stmt_cache;
 #[cfg(feature = "test")]
 pub mod tableinfo;
@@ -62,6 +64,7 @@ use is_crr::*;
 use local_writes::after_delete::x_crsql_after_delete;
 use local_writes::after_insert::x_crsql_after_insert;
 use local_writes::after_update::x_crsql_after_update;
+use site_version::crsql_fill_site_version_if_needed;
 use sqlite::{Destructor, ResultCode};
 use sqlite_nostd as sqlite;
 use sqlite_nostd::{Connection, Context, Value};
@@ -172,6 +175,11 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         return null_mut();
     }
 
+    let rc = crate::bootstrap::crsql_init_site_versions_table(db);
+    if rc != ResultCode::OK as c_int {
+        return null_mut();
+    }
+
     let sync_bit_ptr = sqlite::malloc(mem::size_of::<c_int>()) as *mut c_int;
     unsafe {
         *sync_bit_ptr = 0;
@@ -272,6 +280,23 @@ pub extern "C" fn sqlite3_crsqlcore_init(
 
     let rc = db
         .create_function_v2(
+            "crsql_site_version",
+            0,
+            sqlite::INNOCUOUS | sqlite::UTF8,
+            Some(ext_data as *mut c_void),
+            Some(x_crsql_site_version),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or(ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        unsafe { crsql_freeExtData(ext_data) };
+        return null_mut();
+    }
+
+    let rc = db
+        .create_function_v2(
             "crsql_sha",
             0,
             sqlite::UTF8 | sqlite::INNOCUOUS | sqlite::DETERMINISTIC,
@@ -286,23 +311,6 @@ pub extern "C" fn sqlite3_crsqlcore_init(
         unsafe { crsql_freeExtData(ext_data) };
         return null_mut();
     }
-
-    // let rc = db
-    //     .create_function_v2(
-    //         "crsql_version",
-    //         0,
-    //         sqlite::UTF8 | sqlite::INNOCUOUS | sqlite::DETERMINISTIC,
-    //         None,
-    //         Some(x_crsql_version),
-    //         None,
-    //         None,
-    //         None,
-    //     )
-    //     .unwrap_or(ResultCode::ERROR);
-    // if rc != ResultCode::OK {
-    //     unsafe { crsql_freeExtData(ext_data) };
-    //     return null_mut();
-    // }
 
     let rc = db
         .create_function_v2(
@@ -791,6 +799,28 @@ unsafe extern "C" fn x_crsql_next_db_version(
     }
 
     ctx.result_int64(ret);
+}
+
+/**
+ * Return the current version of the site.
+ *
+ * `select crsql_site_version()`
+ */
+unsafe extern "C" fn x_crsql_site_version(
+    ctx: *mut sqlite::context,
+    _argc: i32,
+    _argv: *mut *mut sqlite::value,
+) {
+    let ext_data = ctx.user_data() as *mut c::crsql_ExtData;
+    let db = ctx.db_handle();
+    let mut err_msg = null_mut();
+    let rc = crsql_fill_site_version_if_needed(db, ext_data, &mut err_msg as *mut _);
+    if rc != ResultCode::OK as c_int {
+        // TODO: pass err_msg!
+        ctx.result_error("failed to fill db version");
+        return;
+    }
+    sqlite::result_int64(ctx, (*ext_data).siteVersion);
 }
 
 /**
