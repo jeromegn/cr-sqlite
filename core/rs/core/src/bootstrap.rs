@@ -166,18 +166,8 @@ fn maybe_update_db_inner(
         }
     }
 
-    // if recorded_version < consts::CRSQLITE_VERSION_0_13_0 {
-    //     update_to_0_13_0(db)?;
-    // }
-
-    // if recorded_version < consts::CRSQLITE_VERSION_0_15_0 {
-    //     update_to_0_15_0(db)?;
-    // }
-
     if recorded_version < consts::CRSQLITE_VERSION_0_17_0 && !is_blank_slate {
-        db.exec_safe("SAVEPOINT crsql_0_17_0")?;
         if let Err(e) = update_to_0_17_0(db) {
-            _ = db.exec_safe("RELEASE crsql_0_17_0");
             return Err(e);
         }
     }

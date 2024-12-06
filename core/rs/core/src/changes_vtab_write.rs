@@ -750,7 +750,6 @@ unsafe fn merge_insert(
     );
     match merge_result {
         Err(rc) => {
-            libc_print::libc_eprint!("error set_winner_clock: {}", rc);
             return Err(rc);
         }
         Ok(inner_rowid) => {
