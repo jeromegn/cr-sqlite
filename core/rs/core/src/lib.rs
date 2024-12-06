@@ -70,7 +70,7 @@ use sqlite_nostd as sqlite;
 use sqlite_nostd::{Connection, Context, Value};
 use tableinfo::{crsql_ensure_table_infos_are_up_to_date, is_table_compatible, pull_table_info};
 use teardown::*;
-use triggers::recreate_update_triggers;
+use triggers::create_triggers;
 
 pub extern "C" fn crsql_as_table(
     ctx: *mut sqlite::context,
@@ -675,7 +675,7 @@ unsafe extern "C" fn x_crsql_commit_alter(
     let rc = if non_destructive {
         match pull_table_info(db, table_name, &mut err_msg as *mut _) {
             Ok(table_info) => {
-                match recreate_update_triggers(db, &table_info, &mut err_msg as *mut _) {
+                match create_triggers(db, &table_info, &mut err_msg) {
                     Ok(ResultCode::OK) => {
                         // need to ensure the right table infos in ext data
                         crsql_ensure_table_infos_are_up_to_date(
