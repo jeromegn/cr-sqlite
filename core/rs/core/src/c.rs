@@ -67,6 +67,8 @@ pub struct crsql_ExtData {
     pub pDbVersionStmt: *mut sqlite::stmt,
     pub pSiteVersionStmt: *mut sqlite::stmt,
     pub tableInfos: *mut ::core::ffi::c_void,
+    pub pkLru: *mut ::core::ffi::c_void,
+    pub lastSiteVersions: *mut ::core::ffi::c_void,
     pub rowsImpacted: ::core::ffi::c_int,
     pub seq: ::core::ffi::c_int,
     pub pSetSyncBitStmt: *mut sqlite::stmt,
@@ -281,7 +283,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::core::mem::size_of::<crsql_ExtData>(),
-        168usize,
+        184usize,
         concat!("Size of: ", stringify!(crsql_ExtData))
     );
     assert_eq!(
@@ -452,8 +454,28 @@ fn bindgen_test_layout_crsql_ExtData() {
         )
     );
     assert_eq!(
-        unsafe { ::core::ptr::addr_of!((*ptr).rowsImpacted) as usize - ptr as usize },
+        unsafe { ::core::ptr::addr_of!((*ptr).pkLru) as usize - ptr as usize },
         112usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(crsql_ExtData),
+            "::",
+            stringify!(pkLru)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).lastSiteVersions) as usize - ptr as usize },
+        120usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(crsql_ExtData),
+            "::",
+            stringify!(lastSiteVersions)
+        )
+    );
+    assert_eq!(
+        unsafe { ::core::ptr::addr_of!((*ptr).rowsImpacted) as usize - ptr as usize },
+        128usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),
@@ -463,7 +485,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).seq) as usize - ptr as usize },
-        116usize,
+        132usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),
@@ -473,7 +495,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).pSetSyncBitStmt) as usize - ptr as usize },
-        120usize,
+        136usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),
@@ -483,7 +505,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).pClearSyncBitStmt) as usize - ptr as usize },
-        128usize,
+        144usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),
@@ -493,7 +515,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).pSetSiteIdOrdinalStmt) as usize - ptr as usize },
-        136usize,
+        152usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),
@@ -503,7 +525,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).pSelectSiteIdOrdinalStmt) as usize - ptr as usize },
-        144usize,
+        160usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),
@@ -513,7 +535,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).pSelectClockTablesStmt) as usize - ptr as usize },
-        152usize,
+        168usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),
@@ -523,7 +545,7 @@ fn bindgen_test_layout_crsql_ExtData() {
     );
     assert_eq!(
         unsafe { ::core::ptr::addr_of!((*ptr).mergeEqualValues) as usize - ptr as usize },
-        160usize,
+        176usize,
         concat!(
             "Offset of field: ",
             stringify!(crsql_ExtData),

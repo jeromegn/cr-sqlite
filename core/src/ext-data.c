@@ -8,6 +8,10 @@
 void crsql_clear_stmt_cache(crsql_ExtData *pExtData);
 void crsql_init_table_info_vec(crsql_ExtData *pExtData);
 void crsql_drop_table_info_vec(crsql_ExtData *pExtData);
+void crsql_init_last_site_versions_map(crsql_ExtData *pExtData);
+void crsql_drop_last_site_versions_map(crsql_ExtData *pExtData);
+// void crsql_init_table_info_vec(crsql_ExtData *pExtData);
+// void crsql_drop_table_info_vec(crsql_ExtData *pExtData);
 
 crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
   crsql_ExtData *pExtData = sqlite3_malloc(sizeof *pExtData);
@@ -55,10 +59,10 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
   // printf("instantiating pSetSiteVersionStmt... current rc: %d\n", rc);
   rc += sqlite3_prepare_v3(
       db,
-      "INSERT INTO crsql_site_versions (site_id, version) VALUES (?, ?)  ON "
-      "CONFLICT (site_id) DO UPDATE SET version = CASE WHEN "
-      "crsql_site_versions.version > excluded.version THEN "
-      "crsql_site_versions.version ELSE excluded.version END",
+      "INSERT OR REPLACE INTO crsql_site_versions (site_id, version) VALUES "
+      "(?, ?)  ON "
+      "CONFLICT (site_id) DO UPDATE SET version = max(excluded.version, "
+      "crsql_site_versions.version) RETURNING version",
       -1, SQLITE_PREPARE_PERSISTENT, &(pExtData->pSetSiteVersionStmt), 0);
 
   // printf("instantiated pSetSiteVersionStmt, rc: %d\n", rc);
@@ -70,9 +74,12 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
   pExtData->pDbVersionStmt = 0;
   pExtData->pSiteVersionStmt = 0;
   pExtData->tableInfos = 0;
+  pExtData->pkLru = 0;
+  pExtData->lastSiteVersions = 0;
   pExtData->rowsImpacted = 0;
   pExtData->updatedTableInfosThisTx = 0;
   crsql_init_table_info_vec(pExtData);
+  crsql_init_last_site_versions_map(pExtData);
 
   sqlite3_stmt *pStmt;
 
@@ -144,6 +151,7 @@ void crsql_freeExtData(crsql_ExtData *pExtData) {
   pExtData->pSelectClockTablesStmt = 0;
   crsql_clear_stmt_cache(pExtData);
   crsql_drop_table_info_vec(pExtData);
+  crsql_drop_last_site_versions_map(pExtData);
   sqlite3_free(pExtData);
 }
 

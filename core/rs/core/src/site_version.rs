@@ -1,6 +1,8 @@
-use core::ptr;
+use alloc::collections::BTreeMap;
+use core::ffi::c_void;
+use core::{mem, ptr};
 
-use crate::alloc::string::ToString;
+use crate::alloc::{boxed::Box, string::ToString, vec::Vec};
 use crate::consts;
 use crate::consts::MIN_POSSIBLE_SITE_VERSION;
 use crate::stmt_cache::reset_cached_stmt;
@@ -100,6 +102,55 @@ pub fn next_site_version(db: *mut sqlite3, ext_data: *mut crsql_ExtData) -> Resu
     Ok(ret)
 }
 
+pub fn insert_site_version(
+    ext_data: *mut crsql_ExtData,
+    insert_site_id: &[u8],
+    insert_site_vrsn: i64,
+) -> Result<(), ResultCode> {
+    unsafe {
+        let mut last_site_versions: mem::ManuallyDrop<Box<BTreeMap<Vec<u8>, i64>>> =
+            mem::ManuallyDrop::new(Box::from_raw(
+                (*ext_data).lastSiteVersions as *mut BTreeMap<Vec<u8>, i64>,
+            ));
+
+        if let Some(site_v) = last_site_versions.get(insert_site_id) {
+            if *site_v >= insert_site_vrsn {
+                // already inserted this site version!
+                return Ok(());
+            }
+        }
+
+        let bind_result = (*ext_data)
+            .pSetSiteVersionStmt
+            .bind_blob(1, insert_site_id, sqlite::Destructor::STATIC)
+            .and_then(|_| {
+                (*ext_data)
+                    .pSetSiteVersionStmt
+                    .bind_int64(2, insert_site_vrsn)
+            });
+
+        if let Err(rc) = bind_result {
+            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+            return Err(rc);
+        }
+        match (*ext_data).pSetSiteVersionStmt.step() {
+            Ok(ResultCode::ROW) => {
+                last_site_versions.insert(
+                    insert_site_id.to_vec(),
+                    (*ext_data).pSetSiteVersionStmt.column_int64(0),
+                );
+            }
+            Ok(_) => {}
+            Err(rc) => {
+                reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+                return Err(rc);
+            }
+        }
+        reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+    }
+    Ok(())
+}
+
 pub fn fill_site_version_if_needed(
     db: *mut sqlite3,
     ext_data: *mut crsql_ExtData,
@@ -171,5 +222,20 @@ pub fn fetch_site_version_from_storage(
                 Err(format!("failed to step db version stmt: {}", rc))
             }
         }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn crsql_init_last_site_versions_map(ext_data: *mut crsql_ExtData) {
+    let map: BTreeMap<Vec<u8>, i64> = BTreeMap::new();
+    unsafe { (*ext_data).lastSiteVersions = Box::into_raw(Box::new(map)) as *mut c_void }
+}
+
+#[no_mangle]
+pub extern "C" fn crsql_drop_last_site_versions_map(ext_data: *mut crsql_ExtData) {
+    unsafe {
+        drop(Box::from_raw(
+            (*ext_data).lastSiteVersions as *mut BTreeMap<Vec<u8>, i64>,
+        ));
     }
 }

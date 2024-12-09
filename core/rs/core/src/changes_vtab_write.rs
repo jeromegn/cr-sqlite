@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
 use alloc::format;
 use alloc::vec::Vec;
@@ -13,6 +14,7 @@ use crate::c::{crsql_Changes_vtab, CrsqlChangesColumn};
 use crate::compare_values::crsql_compare_sqlite_values;
 use crate::pack_columns::bind_package_to_stmt;
 use crate::pack_columns::{unpack_columns, ColumnValue};
+use crate::site_version::insert_site_version;
 use crate::stmt_cache::reset_cached_stmt;
 use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, TableInfo};
 use crate::util::slab_rowid;
@@ -263,26 +265,7 @@ fn set_winner_clock(
     };
 
     if !insert_site_id.is_empty() {
-        unsafe {
-            let bind_result = (*ext_data)
-                .pSetSiteVersionStmt
-                .bind_blob(1, insert_site_id, sqlite::Destructor::STATIC)
-                .and_then(|_| {
-                    (*ext_data)
-                        .pSetSiteVersionStmt
-                        .bind_int64(2, insert_site_vrsn)
-                });
-
-            if let Err(rc) = bind_result {
-                reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
-                return Err(rc);
-            }
-            if let Err(rc) = (*ext_data).pSetSiteVersionStmt.step() {
-                reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
-                return Err(rc);
-            }
-            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
-        }
+        insert_site_version(ext_data, insert_site_id, insert_site_vrsn)?;
     }
     Ok(rowid)
 }
