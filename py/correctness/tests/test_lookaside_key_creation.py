@@ -37,9 +37,9 @@ def test_insert():
     c.commit()
 
     rows = c.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = c.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2)])
+    assert (rows == [(-4371439892308368943, 1, 2)])
 
 
 def test_insert_or_replace():
@@ -51,9 +51,9 @@ def test_insert_or_replace():
         c.commit()
 
         rows = c.execute("SELECT * FROM foo__crsql_pks").fetchall()
-        assert (rows == [(1, 1)])
+        assert (rows == [(-6392667981468109091, 1)])
         rows = c.execute("SELECT * FROM bar__crsql_pks").fetchall()
-        assert (rows == [(1, 1, 2)])
+        assert (rows == [(-4371439892308368943, 1, 2)])
 
     # should be identical no matter how many times we replace the same value
     # as in, the same set of primary keys should map to the same key. Always.
@@ -70,9 +70,9 @@ def test_insert_or_ignore():
         c.execute("INSERT OR IGNORE INTO bar VALUES (1, 2)")
         c.commit()
         rows = c.execute("SELECT * FROM foo__crsql_pks").fetchall()
-        assert (rows == [(1, 1)])
+        assert (rows == [(-6392667981468109091, 1)])
         rows = c.execute("SELECT * FROM bar__crsql_pks").fetchall()
-        assert (rows == [(1, 1, 2)])
+        assert (rows == [(-4371439892308368943, 1, 2)])
 
     run()
     run()
@@ -87,7 +87,7 @@ def test_insert_on_conflict_update():
         c.commit()
 
         rows = c.execute("SELECT * FROM foo__crsql_pks").fetchall()
-        assert (rows == [(1, 1)])
+        assert (rows == [(-6392667981468109091, 1)])
 
     run()
     run()
@@ -107,22 +107,23 @@ def test_update():
     c.commit()
 
     rows = c.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
 
     c.execute("UPDATE foo SET a = 2 WHERE a = 1").fetchall()
     # we do not drop the old row since we'll start tracking sentinel metadata
     # on it
     rows = c.execute(
-        "SELECT * FROM foo__crsql_pks ORDER BY __crsql_key").fetchall()
-    assert (rows == [(1, 1), (2, 2)])
+        "SELECT * FROM foo__crsql_pks ORDER BY a").fetchall()
+    assert (rows == [(-6392667981468109091, 1), (-6449855796199294488, 2)])
 
     c.execute("UPDATE bar SET b = 3 WHERE a = 1")
     c.execute("UPDATE bar SET b = 4 WHERE a = 1")
     c.execute("UPDATE bar SET b = 5 WHERE a = 1")
     c.commit()
     rows = c.execute(
-        "SELECT * FROM bar__crsql_pks ORDER BY __crsql_key").fetchall()
-    assert (rows == [(1, 1, 2), (2, 1, 3), (3, 1, 4), (4, 1, 5)])
+        "SELECT * FROM bar__crsql_pks ORDER BY a, b").fetchall()
+    print(rows)
+    assert (rows == [(-4371439892308368943, 1, 2), (8251330794506372731, 1, 3), (-1901660908853752848, 1, 4), (458430592515859408, 1, 5)])
 
 
 def test_delete():
@@ -136,9 +137,9 @@ def test_delete():
     c.commit()
 
     rows = c.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = c.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2)])
+    assert (rows == [(-4371439892308368943, 1, 2)])
 
 
 def test_delete_all():
@@ -152,9 +153,9 @@ def test_delete_all():
     c.commit()
 
     rows = c.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = c.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2)])
+    assert (rows == [(-4371439892308368943, 1, 2)])
 
 
 def test_merge_new_row():
@@ -167,9 +168,9 @@ def test_merge_new_row():
 
     sync_left_to_right(a, b, 0)
     rows = b.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = b.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2)])
+    assert (rows == [(-4371439892308368943, 1, 2)])
 
 
 def test_merge_existing_row():
@@ -185,9 +186,9 @@ def test_merge_existing_row():
 
     sync_left_to_right(a, b, 0)
     rows = b.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = b.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2)])
+    assert (rows == [(-4371439892308368943, 1, 2)])
 
 
 def test_merge_delete_new_row():
@@ -203,9 +204,9 @@ def test_merge_delete_new_row():
 
     sync_left_to_right(a, b, 0)
     rows = b.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = b.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2)])
+    assert (rows == [(-4371439892308368943, 1, 2)])
 
 
 def test_merge_delete_existing_row():
@@ -224,9 +225,9 @@ def test_merge_delete_existing_row():
 
     sync_left_to_right(a, b, 0)
     rows = b.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = b.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2)])
+    assert (rows == [(-4371439892308368943, 1, 2)])
 
 
 def test_merge_update_existing_row():
@@ -245,6 +246,6 @@ def test_merge_update_existing_row():
 
     sync_left_to_right(a, b, 0)
     rows = b.execute("SELECT * FROM foo__crsql_pks").fetchall()
-    assert (rows == [(1, 1)])
+    assert (rows == [(-6392667981468109091, 1)])
     rows = b.execute("SELECT * FROM bar__crsql_pks").fetchall()
-    assert (rows == [(1, 1, 2), (2, 1, 3)])
+    assert (rows == [(-4371439892308368943, 1, 2), (8251330794506372731, 1, 3)])

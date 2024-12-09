@@ -1,6 +1,7 @@
 use sqlite_nostd::{sqlite3, Connection, Destructor, ManagedStmt, ResultCode};
 extern crate alloc;
-use crate::tableinfo::ColumnInfo;
+use crate::pack_columns::pack_columns;
+use crate::tableinfo::{hash_key, ColumnInfo};
 use crate::util::get_dflt_value;
 use alloc::format;
 use alloc::string::String;
@@ -88,14 +89,14 @@ fn create_clock_rows_from_stmt(
         pk_where_conditions = crate::util::where_list(pk_cols, None)?
     ))?;
     let create_key = db.prepare_v2(&format!(
-        "INSERT INTO \"{table}__crsql_pks\" ({pk_cols}) VALUES ({pk_values}) RETURNING __crsql_key",
+        "INSERT INTO \"{table}__crsql_pks\" (__crsql_key, {pk_cols}) VALUES (?, {pk_bindings}) RETURNING __crsql_key",
         table = crate::util::escape_ident(table),
         pk_cols = pk_cols
             .iter()
             .map(|f| format!("\"{}\"", crate::util::escape_ident(&f.name)))
             .collect::<Vec<_>>()
             .join(", "),
-        pk_values = pk_cols.iter().map(|_| "?").collect::<Vec<_>>().join(", "),
+        pk_bindings = pk_cols.iter().map(|_| "?").collect::<Vec<_>>().join(", "),
     ))?;
     // We do not grab nextdbversion on migration.
     // The idea is that other nodes will apply the same migration
@@ -144,11 +145,15 @@ fn get_or_create_key(
     pk_cols: &Vec<ColumnInfo>,
     read_stmt: &ManagedStmt,
 ) -> Result<sqlite::int64, ResultCode> {
+    let mut pks = Vec::with_capacity(pk_cols.len());
+
     for (i, _name) in pk_cols.iter().enumerate() {
         let value = read_stmt.column_value(i as i32)?;
+        pks.push(value);
         // TODO: ok to bind into to places at once?
         select_stmt.bind_value(i as i32 + 1, value)?;
-        create_stmt.bind_value(i as i32 + 1, value)?;
+        // for the crsql_key fn
+        create_stmt.bind_value(i as i32 + 2, value)?;
     }
 
     if let Ok(ResultCode::ROW) = select_stmt.step() {
@@ -157,10 +162,15 @@ fn get_or_create_key(
         select_stmt.reset()?;
         return Ok(key);
     }
+
+    let key = hash_key(&pack_columns(&pks)?);
+    create_stmt.bind_int64(1, key)?;
+
     select_stmt.reset()?;
 
     if let Ok(ResultCode::ROW) = create_stmt.step() {
         let key = create_stmt.column_int64(0);
+        // libc_print::libc_eprintln!("backfilled key: {}", key);
         create_stmt.reset()?;
         return Ok(key);
     }

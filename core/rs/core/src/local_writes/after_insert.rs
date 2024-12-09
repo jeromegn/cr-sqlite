@@ -46,6 +46,7 @@ fn after_insert(
     let (create_record_existed, key_new) = tbl_info
         .get_or_create_key_for_insert(db, pks_new)
         .map_err(|_| "failed geteting or creating lookaside key")?;
+    // libc_print::libc_eprintln!("after insert key: {}", key_new);
     if tbl_info.non_pks.is_empty() {
         let seq = bump_seq(ext_data);
         // just a sentinel record

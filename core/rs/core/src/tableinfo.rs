@@ -3,6 +3,7 @@ use crate::c::crsql_ExtData;
 use crate::c::crsql_fetchPragmaSchemaVersion;
 use crate::c::TABLE_INFO_SCHEMA_VERSION;
 use crate::pack_columns::bind_package_to_stmt;
+use crate::pack_columns::pack_columns;
 use crate::pack_columns::ColumnValue;
 use crate::stmt_cache::reset_cached_stmt;
 use crate::util::Countable;
@@ -22,10 +23,12 @@ use sqlite::sqlite3;
 use sqlite::value;
 use sqlite_nostd as sqlite;
 use sqlite_nostd::Connection;
+use sqlite_nostd::Context;
 use sqlite_nostd::ManagedStmt;
 use sqlite_nostd::ResultCode;
 use sqlite_nostd::Stmt;
 use sqlite_nostd::StrRef;
+use twox_hash::xxhash64;
 
 pub struct TableInfo {
     pub tbl_name: String,
@@ -75,26 +78,55 @@ impl TableInfo {
         Err(ResultCode::ERROR)
     }
 
-    pub fn get_or_create_key(
+    // pub fn get_or_create_key(
+    //     &self,
+    //     db: *mut sqlite3,
+    //     pks: &Vec<ColumnValue>,
+    // ) -> Result<sqlite::int64, ResultCode> {
+    //     let stmt_ref = self.get_select_key_stmt(db)?;
+    //     let stmt = stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
+    //     bind_package_to_stmt(stmt.stmt, pks, 0)?;
+    //     match stmt.step() {
+    //         Ok(ResultCode::DONE) => {
+    //             // create it
+    //             reset_cached_stmt(stmt.stmt)?;
+    //             let ret = self.create_key(db, pks)?;
+    //             return Ok(ret);
+    //         }
+    //         Ok(ResultCode::ROW) => {
+    //             // return it
+    //             let ret = stmt.column_int64(0);
+    //             reset_cached_stmt(stmt.stmt)?;
+    //             return Ok(ret);
+    //         }
+    //         Ok(rc) | Err(rc) => {
+    //             reset_cached_stmt(stmt.stmt)?;
+    //             return Err(rc);
+    //         }
+    //     }
+    // }
+
+    pub fn ensure_key(
         &self,
         db: *mut sqlite3,
+        key: i64,
         pks: &Vec<ColumnValue>,
-    ) -> Result<sqlite::int64, ResultCode> {
+    ) -> Result<(), ResultCode> {
         let stmt_ref = self.get_select_key_stmt(db)?;
         let stmt = stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
         bind_package_to_stmt(stmt.stmt, pks, 0)?;
         match stmt.step() {
             Ok(ResultCode::DONE) => {
+                // libc_print::libc_eprintln!("creating pks entry for key: {}", key);
                 // create it
                 reset_cached_stmt(stmt.stmt)?;
-                let ret = self.create_key(db, pks)?;
-                return Ok(ret);
+                self.create_key(db, key, pks)?;
+                return Ok(());
             }
             Ok(ResultCode::ROW) => {
-                // return it
-                let ret = stmt.column_int64(0);
+                // libc_print::libc_eprintln!("GOT pks entry for key: {}", key);
                 reset_cached_stmt(stmt.stmt)?;
-                return Ok(ret);
+                return Ok(());
             }
             Ok(rc) | Err(rc) => {
                 reset_cached_stmt(stmt.stmt)?;
@@ -140,30 +172,21 @@ impl TableInfo {
     ) -> Result<(bool, sqlite::int64), ResultCode> {
         let stmt_ref = self.get_insert_or_ignore_returning_key_stmt(db)?;
         let stmt = stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
+
+        let bytes = pack_columns(pks)?;
+        let key = hash_key(&bytes);
+        // libc_print::libc_eprintln!("creating key from raw values, key: {}", key);
+
+        stmt.bind_int64(1, key)?;
+
         for (i, pk) in pks.iter().enumerate() {
-            stmt.bind_value(i as i32 + 1, *pk)?;
+            stmt.bind_value(i as i32 + 2, *pk)?;
         }
         match stmt.step() {
             Ok(ResultCode::DONE) => {
                 // already exists, get it
                 reset_cached_stmt(stmt.stmt)?;
-                let stmt_ref = self.get_select_key_stmt(db)?;
-                let stmt = stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
-                for (i, pk) in pks.iter().enumerate() {
-                    stmt.bind_value(i as i32 + 1, *pk)?;
-                }
-                let ret = stmt.step()?;
-                match ret {
-                    ResultCode::ROW => {
-                        let ret = stmt.column_int64(0);
-                        reset_cached_stmt(stmt.stmt)?;
-                        return Ok((true, ret));
-                    }
-                    _ => {
-                        reset_cached_stmt(stmt.stmt)?;
-                        return Err(ret);
-                    }
-                }
+                return Ok((true, key));
             }
             Ok(ResultCode::ROW) => {
                 // return it
@@ -181,17 +204,18 @@ impl TableInfo {
     fn create_key(
         &self,
         db: *mut sqlite3,
+        key: i64,
         pks: &Vec<ColumnValue>,
     ) -> Result<sqlite::int64, ResultCode> {
         let stmt_ref = self.get_insert_key_stmt(db)?;
         let stmt = stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
-        bind_package_to_stmt(stmt.stmt, pks, 0)?;
+        stmt.bind_int64(1, key)?;
+        bind_package_to_stmt(stmt.stmt, pks, 1)?;
         match stmt.step() {
-            Ok(ResultCode::ROW) => {
+            Ok(ResultCode::ROW) | Ok(ResultCode::DONE) => {
                 // return it
-                let ret = stmt.column_int64(0);
                 reset_cached_stmt(stmt.stmt)?;
-                return Ok(ret);
+                return Ok(key);
             }
             Ok(rc) | Err(rc) => {
                 reset_cached_stmt(stmt.stmt)?;
@@ -207,15 +231,21 @@ impl TableInfo {
     ) -> Result<sqlite::int64, ResultCode> {
         let stmt_ref = self.get_insert_key_stmt(db)?;
         let stmt = stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
+
+        let bytes = pack_columns(pks)?;
+        let key = hash_key(&bytes);
+        // libc_print::libc_eprintln!("creating key from raw values, key: {}", key);
+
+        stmt.bind_int64(1, key)?;
+
         for (i, pk) in pks.iter().enumerate() {
-            stmt.bind_value(i as i32 + 1, *pk)?;
+            stmt.bind_value(i as i32 + 2, *pk)?;
         }
         match stmt.step() {
-            Ok(ResultCode::ROW) => {
-                // return it
-                let ret = stmt.column_int64(0);
+            Ok(ResultCode::ROW) | Ok(ResultCode::DONE) => {
+                // return the hashed key
                 reset_cached_stmt(stmt.stmt)?;
-                return Ok(ret);
+                return Ok(key);
             }
             Ok(rc) | Err(rc) => {
                 reset_cached_stmt(stmt.stmt)?;
@@ -247,7 +277,7 @@ impl TableInfo {
     ) -> Result<Ref<Option<ManagedStmt>>, ResultCode> {
         if self.insert_key_stmt.try_borrow()?.is_none() {
             let sql = format!(
-                "INSERT INTO \"{table_name}__crsql_pks\" ({pk_list}) VALUES ({pk_bindings}) RETURNING __crsql_key",
+                "INSERT OR IGNORE INTO \"{table_name}__crsql_pks\" (__crsql_key, {pk_list}) VALUES (?, {pk_bindings}) RETURNING __crsql_key",
                 table_name = crate::util::escape_ident(&self.tbl_name),
                 pk_list = crate::util::as_identifier_list(&self.pks, None)?,
                 pk_bindings = crate::util::binding_list(self.pks.len()),
@@ -268,7 +298,7 @@ impl TableInfo {
             .is_none()
         {
             let sql = format!(
-                "INSERT OR IGNORE INTO \"{table_name}__crsql_pks\" ({pk_list}) VALUES ({pk_bindings}) RETURNING __crsql_key",
+                "INSERT OR IGNORE INTO \"{table_name}__crsql_pks\" (__crsql_key, {pk_list}) VALUES (?, {pk_bindings}) RETURNING __crsql_key",
                 table_name = crate::util::escape_ident(&self.tbl_name),
                 pk_list = crate::util::as_identifier_list(&self.pks, None)?,
                 pk_bindings = crate::util::binding_list(self.pks.len()),
@@ -295,7 +325,7 @@ impl TableInfo {
                 ?,
                 ?,
                 ?
-              ) RETURNING key",
+              )",
                 table_name = crate::util::escape_ident(&self.tbl_name),
             );
             let ret = db.prepare_v3(&sql, sqlite::PREPARE_PERSISTENT)?;
@@ -645,6 +675,12 @@ impl Drop for TableInfo {
         // we'll leak rather than panic
         let _ = self.clear_stmts();
     }
+}
+
+const SEED: u64 = 0xc651_4843_1995_363f;
+
+pub fn hash_key(pks: &[u8]) -> i64 {
+    0i64.wrapping_add_unsigned(xxhash64::Hasher::oneshot(SEED, pks))
 }
 
 pub struct ColumnInfo {
@@ -1010,4 +1046,18 @@ pub fn is_table_compatible(
     }
 
     return Ok(true);
+}
+
+pub extern "C" fn crsql_key(ctx: *mut sqlite::context, argc: i32, argv: *mut *mut sqlite::value) {
+    let args = sqlite::args!(argc, argv);
+
+    match pack_columns(args) {
+        Err(code) => {
+            ctx.result_error("Failed to pack columns");
+            ctx.result_error_code(code);
+        }
+        Ok(blob) => {
+            ctx.result_int64(hash_key(&blob));
+        }
+    }
 }

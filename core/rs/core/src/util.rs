@@ -67,6 +67,12 @@ pub fn slab_rowid(idx: i32, rowid: sqlite::int64) -> sqlite::int64 {
     }
 
     let modulo = rowid % crate::consts::ROWID_SLAB_SIZE;
+    // libc_print::libc_eprintln!(
+    //     "slab idx: {}, size: {}, rowid: {}",
+    //     idx,
+    //     modulo,
+    //     (idx as i64) * crate::consts::ROWID_SLAB_SIZE + modulo
+    // );
     return (idx as i64) * crate::consts::ROWID_SLAB_SIZE + modulo;
 }
 

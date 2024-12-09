@@ -5,7 +5,7 @@ import pytest
 changes_query = "SELECT [table], [pk], [cid], [val] FROM crsql_changes"
 changes_with_versions_query = "SELECT [table], [pk], [cid], [val], [db_version], [col_version] FROM crsql_changes"
 full_changes_query = "SELECT [table], [pk], [cid], [val], [db_version], [col_version], [site_id] FROM crsql_changes"
-clock_query = "SELECT key, col_version, db_version, col_name, site_id FROM todo__crsql_clock"
+clock_query = "SELECT key, col_version, db_version, col_name, site_id FROM todo__crsql_clock ORDER BY db_version ASC, seq ASC"
 
 
 def test_c1_4_no_primary_keys():
@@ -84,10 +84,13 @@ def test_drop_clock_on_col_remove():
                 ('todo', b'\x01\t\x01', 'complete', 0),
                 ('todo', b'\x01\t\x01', 'list', 'home')]
     assert (changes == expected)
+    print(changes)
 
     clock_entries = c.execute(clock_query).fetchall()
-    assert (clock_entries == [(1, 1, 1, 'complete', 0),
-            (1, 1, 1, 'list', 0), (1, 1, 1, 'name', 0)])
+
+    print(clock_entries)
+
+    assert (clock_entries == [(-6392667981468109091, 1, 1, 'name', 0), (-6392667981468109091, 1, 1, 'complete', 0), (-6392667981468109091, 1, 1, 'list', 0)])
 
     c.execute("SELECT crsql_begin_alter('todo');")
     # Dropping a column should remove its entries from our replication logs.
@@ -105,7 +108,7 @@ def test_drop_clock_on_col_remove():
     clock_entries = c.execute(clock_query).fetchall()
     assert (
         clock_entries == [
-            (1, 1, 1, 'complete', 0), (1, 1, 1, 'name', 0)]
+            (-6392667981468109091, 1, 1, 'name', 0), (-6392667981468109091, 1, 1, 'complete', 0)]
     )
 
 
@@ -308,8 +311,8 @@ def test_backfill_for_alter_does_not_move_dbversion():
             # Existing rows have their existing db_version (1).
             # New rows get the current db version given
             # migrations on other will create convergence.
-            ('foo', b'\x01\t\x01', 'name', 'bar', 1, 1, site_id),
             ('foo', b'\x01\t\x02', 'name', 'baz', 1, 1, site_id),
+            ('foo', b'\x01\t\x01', 'name', 'bar', 1, 1, site_id),
             ('foo', b'\x01\t\x02', 'age', 33, 1, 1, site_id)])
 
 

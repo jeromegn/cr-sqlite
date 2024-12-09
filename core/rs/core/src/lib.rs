@@ -146,6 +146,22 @@ pub extern "C" fn sqlite3_crsqlcore_init(
 
     let rc = db
         .create_function_v2(
+            "crsql_key",
+            -1,
+            sqlite::DETERMINISTIC | sqlite::UTF8,
+            None,
+            Some(tableinfo::crsql_key),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or(sqlite::ResultCode::ERROR);
+    if rc != ResultCode::OK {
+        return null_mut();
+    }
+
+    let rc = db
+        .create_function_v2(
             "crsql_as_table",
             1,
             sqlite::UTF8,

@@ -28,7 +28,7 @@ pub extern "C" fn crsql_pack_columns(
     }
 }
 
-fn pack_columns(args: &[*mut sqlite::value]) -> Result<Vec<u8>, ResultCode> {
+pub fn pack_columns(args: &[*mut sqlite::value]) -> Result<Vec<u8>, ResultCode> {
     let mut buf = vec![];
     /*
      * Format:

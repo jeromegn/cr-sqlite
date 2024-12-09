@@ -70,34 +70,39 @@ pub fn next_site_version(db: *mut sqlite3, ext_data: *mut crsql_ExtData) -> Resu
 
         let site_id_slice =
             core::slice::from_raw_parts((*ext_data).siteId, consts::SITE_ID_LEN as usize);
-        // libc_print::libc_println!(
-        //     "next_site_version: setting into DB! {:?} => {}",
-        //     site_id_slice,
-        //     ret
-        // );
-        // next site id is not set in the DB yet, do this now.
-        let bind_result = (*ext_data)
-            .pSetSiteVersionStmt
-            .bind_blob(1, site_id_slice, sqlite_nostd::Destructor::STATIC)
-            .and_then(|_| (*ext_data).pSetSiteVersionStmt.bind_int64(2, ret));
 
-        if bind_result.is_err() {
-            return Err("failed binding to set_site_version_stmt".into());
-        }
-
-        if (*ext_data).pSetSiteVersionStmt.step().is_err() {
-            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)
-                .map_err(|_| "failed to reset cached set_site_version_stmt")?;
-            return Err("failed to insert site_version for current site ID".into());
-        }
-
-        reset_cached_stmt((*ext_data).pSetSiteVersionStmt)
-            .map_err(|_| "failed to reset cached set_site_version_stmt")?;
+        insert_site_version(ext_data, site_id_slice, ret)
+            .map_err(|_| "failed to insert site version")?;
 
         (*ext_data).nextSiteVersionSet = 1;
     }
 
     Ok(ret)
+}
+
+pub fn insert_site_version(
+    ext_data: *mut crsql_ExtData,
+    site_id: &[u8],
+    version: i64,
+) -> Result<(), ResultCode> {
+    unsafe {
+        let bind_result = (*ext_data)
+            .pSetSiteVersionStmt
+            .bind_blob(1, site_id, sqlite::Destructor::STATIC)
+            .and_then(|_| (*ext_data).pSetSiteVersionStmt.bind_int64(2, version));
+
+        if let Err(rc) = bind_result {
+            // reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+            (*ext_data).pSetSiteVersionStmt.clear_bindings()?;
+            return Err(rc);
+        }
+        if let Err(rc) = (*ext_data).pSetSiteVersionStmt.step() {
+            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+            return Err(rc);
+        }
+        reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
+    }
+    Ok(())
 }
 
 pub fn fill_site_version_if_needed(

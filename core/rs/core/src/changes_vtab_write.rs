@@ -7,14 +7,16 @@ use core::mem;
 use sqlite::Stmt;
 use sqlite_nostd as sqlite;
 use sqlite_nostd::{sqlite3, ResultCode, Value};
+use twox_hash::xxhash64;
 
 use crate::c::crsql_ExtData;
 use crate::c::{crsql_Changes_vtab, CrsqlChangesColumn};
 use crate::compare_values::crsql_compare_sqlite_values;
 use crate::pack_columns::bind_package_to_stmt;
 use crate::pack_columns::{unpack_columns, ColumnValue};
+use crate::site_version::insert_site_version;
 use crate::stmt_cache::reset_cached_stmt;
-use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, TableInfo};
+use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, hash_key, TableInfo};
 use crate::util::slab_rowid;
 
 /**
@@ -250,11 +252,11 @@ fn set_winner_clock(
         return Err(rc);
     }
 
-    let rowid = match set_stmt.step() {
-        Ok(ResultCode::ROW) => {
-            let rowid = set_stmt.column_int64(0);
+    match set_stmt.step() {
+        Ok(ResultCode::DONE) => {
+            // let rowid = set_stmt.column_int64(0);
+            // libc_print::libc_eprintln!("got rowid: {}", rowid);
             reset_cached_stmt(set_stmt.stmt)?;
-            rowid
         }
         _ => {
             reset_cached_stmt(set_stmt.stmt)?;
@@ -263,28 +265,9 @@ fn set_winner_clock(
     };
 
     if !insert_site_id.is_empty() {
-        unsafe {
-            let bind_result = (*ext_data)
-                .pSetSiteVersionStmt
-                .bind_blob(1, insert_site_id, sqlite::Destructor::STATIC)
-                .and_then(|_| {
-                    (*ext_data)
-                        .pSetSiteVersionStmt
-                        .bind_int64(2, insert_site_vrsn)
-                });
-
-            if let Err(rc) = bind_result {
-                reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
-                return Err(rc);
-            }
-            if let Err(rc) = (*ext_data).pSetSiteVersionStmt.step() {
-                reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
-                return Err(rc);
-            }
-            reset_cached_stmt((*ext_data).pSetSiteVersionStmt)?;
-        }
+        insert_site_version(ext_data, insert_site_id, insert_site_vrsn)?;
     }
-    Ok(rowid)
+    Ok(key)
 }
 
 fn merge_sentinel_only_insert(
@@ -484,6 +467,8 @@ fn get_local_cl(
     }
 }
 
+const SEED: u64 = 0xc651_4843_1995_363f;
+
 unsafe fn merge_insert(
     vtab: *mut sqlite::vtab,
     argc: c_int,
@@ -560,11 +545,14 @@ unsafe fn merge_insert(
     let tbl_info_index = tbl_info_index.unwrap();
 
     let tbl_info = &tbl_infos[tbl_info_index];
-    let unpacked_pks = unpack_columns(insert_pks.blob())?;
+    let insert_pks_blob = insert_pks.blob();
+
+    let key = hash_key(insert_pks_blob);
+    // libc_print::libc_eprintln!("hashed key: {}", key);
 
     // Get or create key as the first thing we do.
     // We'll need the key for all later operations.
-    let key = tbl_info.get_or_create_key(db, &unpacked_pks)?;
+    // let key = tbl_info.get_or_create_key(db, &unpacked_pks)?;
 
     let local_cl = get_local_cl(db, &tbl_info, key)?;
 
@@ -573,6 +561,8 @@ unsafe fn merge_insert(
     if insert_cl < local_cl {
         return Ok(ResultCode::OK);
     }
+
+    let unpacked_pks = unpack_columns(insert_pks_blob)?;
 
     let is_delete = insert_cl % 2 == 0;
     // Resurrect or update to latest cl.
@@ -607,6 +597,7 @@ unsafe fn merge_insert(
                 return Err(rc);
             }
             Ok(inner_rowid) => {
+                tbl_info.ensure_key(db, key, &unpacked_pks)?;
                 (*(*tab).pExtData).rowsImpacted += 1;
                 *rowid = slab_rowid(tbl_info_index as i32, inner_rowid);
                 return Ok(ResultCode::OK);
@@ -647,6 +638,7 @@ unsafe fn merge_insert(
             Ok(inner_rowid) => {
                 // a success & rowid of -1 means the merge was a no-op
                 if inner_rowid != -1 {
+                    tbl_info.ensure_key(db, key, &unpacked_pks)?;
                     (*(*tab).pExtData).rowsImpacted += 1;
                     *rowid = slab_rowid(tbl_info_index as i32, inner_rowid);
                     return Ok(ResultCode::OK);
@@ -699,6 +691,8 @@ unsafe fn merge_insert(
             insert_col_vrsn,
             errmsg,
         )?;
+
+    // libc_print::libc_eprintln!("did cid win? {} (key: {})", does_cid_win, key);
 
     if !does_cid_win {
         // doesCidWin == 0? compared against our clocks, nothing wins. OK and
@@ -753,6 +747,7 @@ unsafe fn merge_insert(
             return Err(rc);
         }
         Ok(inner_rowid) => {
+            tbl_info.ensure_key(db, key, &unpacked_pks)?;
             (*(*tab).pExtData).rowsImpacted += 1;
             *rowid = slab_rowid(tbl_info_index as i32, inner_rowid);
             return Ok(ResultCode::OK);

@@ -121,6 +121,7 @@ def sync_left_to_right(l, r, since):
 def test_overwriting_keeps_track_of_true_site_version():
     def create_db1():
         db1 = connect(":memory:")
+        # db1.set_trace_callback(print)
         db1.execute("CREATE TABLE foo (a PRIMARY KEY NOT NULL, b DEFAULT 0);")
         db1.execute("SELECT crsql_as_crr('foo');")
         db1.commit()
@@ -128,6 +129,7 @@ def test_overwriting_keeps_track_of_true_site_version():
 
     def create_db2():
         db2 = connect(":memory:")
+        # db2.set_trace_callback(print)
         db2.execute("CREATE TABLE foo (a PRIMARY KEY NOT NULL, b DEFAULT 0);")
         db2.execute("SELECT crsql_as_crr('foo');")
         db2.commit()
@@ -146,6 +148,8 @@ def test_overwriting_keeps_track_of_true_site_version():
 
     sync_left_to_right(db1, db2, 0)
 
+    assert db2.execute("SELECT crsql_site_version()").fetchone()[0] == 0
+
     db2.execute("UPDATE foo SET b = 2;")
     db2.commit()
 
@@ -156,6 +160,9 @@ def test_overwriting_keeps_track_of_true_site_version():
     db2_site_id = get_site_id(db2)
 
     assert (changes == [('foo', b'\x01\t\x01', 'b', 2, 3, 3, db2_site_id, 1, 0, 1)])
+    # checking that this is stable even after a sync
+    assert db1.execute("SELECT crsql_site_version()").fetchone()[0] == 2
+    assert db1.execute("SELECT crsql_db_version()").fetchone()[0] == 3
     
     db1.execute("UPDATE foo SET b = 3;")
     db1.commit() # site_version = 3

@@ -59,7 +59,9 @@ pub extern "C" fn crsql_init_peer_tracking_table(db: *mut sqlite3) -> c_int {
 
 #[no_mangle]
 pub extern "C" fn crsql_init_site_versions_table(db: *mut sqlite3) -> c_int {
-    match db.exec_safe("CREATE TABLE IF NOT EXISTS crsql_site_versions (\"site_id\" BLOB NOT NULL PRIMARY KEY, \"version\" INTEGER NOT NULL) STRICT;") {
+    match db.exec_safe("
+        CREATE TABLE IF NOT EXISTS crsql_site_versions (\"site_id\" BLOB NOT NULL PRIMARY KEY, \"version\" INTEGER NOT NULL) STRICT;
+    ") {
       Ok(_) => ResultCode::OK as c_int,
       Err(code) => code as c_int
     }
