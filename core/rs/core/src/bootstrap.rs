@@ -235,7 +235,7 @@ pub fn create_clock_table(
         ))?;
     db.exec_safe(
         &format!(
-        "CREATE TABLE IF NOT EXISTS \"{table_name}__crsql_pks\" (__crsql_key INTEGER PRIMARY KEY, {pk_list})",
+        "CREATE TABLE IF NOT EXISTS \"{table_name}__crsql_pks\" (__crsql_key INTEGER PRIMARY KEY, {pk_list}) WITHOUT ROWID",
         table_name = table_name,
         pk_list = pk_list,
         )
