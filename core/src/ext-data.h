@@ -37,7 +37,6 @@ struct crsql_ExtData {
   sqlite3_stmt *pDbVersionStmt;
   sqlite3_stmt *pSiteVersionStmt;
   void *tableInfos;
-  void *keyCache;
   void *lastSiteVersions;
 
   // tracks the number of rows impacted by all inserts into crsql_changes in the

@@ -226,53 +226,24 @@ fn mark_locally_updated(
 ) -> Result<ResultCode, String> {
     // libc_print::libc_println!("mark_locally_updated, site_version = {}", site_version);
 
-    let select_clock_stmt_ref = tbl_info
-        .get_select_clock_stmt(db)
-        .map_err(|_e| "failed to get select_clock_stmt")?;
-    let select_clock_stmt = select_clock_stmt_ref
+    let update_clock_stmt_ref = tbl_info
+        .get_update_clock_stmt(db)
+        .map_err(|_e| "failed to get update_clock_stmt")?;
+    let update_clock_stmt = update_clock_stmt_ref
         .as_ref()
-        .ok_or("Failed to deref select_clock_stmt")?;
+        .ok_or("Failed to deref update_clock_stmt")?;
 
-    select_clock_stmt
-        .bind_int64(1, new_key)
-        .and_then(|_| select_clock_stmt.bind_text(2, &col_info.name, sqlite::Destructor::STATIC))
-        .map_err(|_| "failed binding to select_clock_stmt")?;
+    update_clock_stmt
+        .bind_int64(1, db_version)
+        .and_then(|_| update_clock_stmt.bind_int(2, seq))
+        .and_then(|_| update_clock_stmt.bind_int64(3, site_version))
+        .and_then(|_| update_clock_stmt.bind_int64(4, new_key))
+        .and_then(|_| update_clock_stmt.bind_text(5, &col_info.name, sqlite::Destructor::STATIC))
+        .map_err(|_| "failed binding to update_clock_stmt")?;
 
-    let exists = match select_clock_stmt.step() {
-        Ok(ResultCode::DONE) => false,
-        Ok(ResultCode::ROW) => true,
-        Ok(rc) | Err(rc) => {
-            reset_cached_stmt(select_clock_stmt.stmt)
-                .map_err(|_e| "done -- unable to reset cached select_clock_stmt stmt")?;
-            return Err(format!(
-                "failed to check for clock table row existence, return code: {rc}"
-            ));
-        }
-    };
+    step_trigger_stmt(update_clock_stmt)?;
 
-    reset_cached_stmt(select_clock_stmt.stmt)
-        .map_err(|_e| "done -- unable to reset cached select_clock_stmt stmt")?;
-
-    if exists {
-        let update_clock_stmt_ref = tbl_info
-            .get_update_clock_stmt(db)
-            .map_err(|_e| "failed to get update_clock_stmt")?;
-        let update_clock_stmt = update_clock_stmt_ref
-            .as_ref()
-            .ok_or("Failed to deref update_clock_stmt")?;
-
-        update_clock_stmt
-            .bind_int64(1, db_version)
-            .and_then(|_| update_clock_stmt.bind_int(2, seq))
-            .and_then(|_| update_clock_stmt.bind_int64(3, site_version))
-            .and_then(|_| update_clock_stmt.bind_int64(4, new_key))
-            .and_then(|_| {
-                update_clock_stmt.bind_text(5, &col_info.name, sqlite::Destructor::STATIC)
-            })
-            .map_err(|_| "failed binding to update_clock_stmt")?;
-
-        step_trigger_stmt(update_clock_stmt)
-    } else {
+    if changes64(db) == 0 {
         let insert_clock_stmt_ref = tbl_info
             .get_insert_clock_stmt(db)
             .map_err(|_e| "failed to get insert_clock_stmt")?;
@@ -290,24 +261,8 @@ fn mark_locally_updated(
             .and_then(|_| insert_clock_stmt.bind_int64(5, site_version))
             .map_err(|_| "failed binding to insert_clock_stmt")?;
 
-        step_trigger_stmt(insert_clock_stmt)
+        step_trigger_stmt(insert_clock_stmt)?;
     }
 
-    // let mark_locally_updated_stmt_ref = tbl_info
-    //     .get_mark_locally_updated_stmt(db)
-    //     .map_err(|_e| "failed to get mark_locally_updated_stmt")?;
-    // let mark_locally_updated_stmt = mark_locally_updated_stmt_ref
-    //     .as_ref()
-    //     .ok_or("Failed to deref sentinel stmt")?;
-
-    // mark_locally_updated_stmt
-    //     .bind_int64(1, new_key)
-    //     .and_then(|_| {
-    //         mark_locally_updated_stmt.bind_text(2, &col_info.name, sqlite::Destructor::STATIC)
-    //     })
-    //     .and_then(|_| mark_locally_updated_stmt.bind_int64(3, db_version))
-    //     .and_then(|_| mark_locally_updated_stmt.bind_int(4, seq))
-    //     .and_then(|_| mark_locally_updated_stmt.bind_int64(5, site_version))
-    //     .map_err(|_| "failed binding to mark_locally_updated_stmt")?;
-    // step_trigger_stmt(mark_locally_updated_stmt)
+    Ok(ResultCode::OK)
 }

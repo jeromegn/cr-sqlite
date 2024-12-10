@@ -667,6 +667,8 @@ impl TableInfo {
         stmt.take();
         let mut stmt = self.select_clock_stmt.try_borrow_mut()?;
         stmt.take();
+        let mut stmt = self.combo_insert_clock_stmt.try_borrow_mut()?;
+        stmt.take();
         let mut stmt = self.insert_clock_stmt.try_borrow_mut()?;
         stmt.take();
         let mut stmt = self.update_clock_stmt.try_borrow_mut()?;
