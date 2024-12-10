@@ -72,6 +72,7 @@ use tableinfo::{crsql_ensure_table_infos_are_up_to_date, is_table_compatible, pu
 use teardown::*;
 use triggers::create_triggers;
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn crsql_as_table(
     ctx: *mut sqlite::context,
     argc: i32,
@@ -105,6 +106,7 @@ fn crsql_as_table_impl(db: *mut sqlite::sqlite3, table: &str) -> Result<ResultCo
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sqlite3_crsqlcore_init(
     db: *mut sqlite::sqlite3,
     err_msg: *mut *mut c_char,
@@ -556,7 +558,7 @@ unsafe extern "C" fn x_crsql_as_crr(
 ) {
     if argc == 0 {
         ctx.result_error(
-            "Wrong number of args provided to crsql_as_crr. Provide the schema 
+            "Wrong number of args provided to crsql_as_crr. Provide the schema
           name and table name or just the table name.",
         );
         return;
@@ -617,7 +619,7 @@ unsafe extern "C" fn x_crsql_begin_alter(
 ) {
     if argc == 0 {
         ctx.result_error(
-            "Wrong number of args provided to crsql_begin_alter. Provide the 
+            "Wrong number of args provided to crsql_begin_alter. Provide the
           schema name and table name or just the table name.",
         );
         return;
@@ -653,7 +655,7 @@ unsafe extern "C" fn x_crsql_commit_alter(
 ) {
     if argc == 0 {
         ctx.result_error(
-            "Wrong number of args provided to crsql_commit_alter. Provide the 
+            "Wrong number of args provided to crsql_commit_alter. Provide the
           schema name and table name or just the table name.",
         );
         return;
@@ -870,6 +872,7 @@ unsafe extern "C" fn x_crsql_sync_bit(
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn crsql_is_crr(db: *mut sqlite::sqlite3, table: *const c_char) -> c_int {
     if let Ok(table) = unsafe { CStr::from_ptr(table).to_str() } {
         match is_crr(db, table) {
@@ -888,6 +891,7 @@ pub extern "C" fn crsql_is_crr(db: *mut sqlite::sqlite3, table: *const c_char) -
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn crsql_is_table_compatible(
     db: *mut sqlite::sqlite3,
     table: *const c_char,
@@ -903,6 +907,7 @@ pub extern "C" fn crsql_is_table_compatible(
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn crsql_create_crr(
     db: *mut sqlite::sqlite3,
     schema: *const c_char,

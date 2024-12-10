@@ -315,7 +315,7 @@ fn merge_sentinel_only_insert(
         return Err(rc);
     }
 
-    if let Ok(_) = rc {
+    if rc.is_ok() {
         zero_clocks_on_resurrect(db, tbl_info, key, remote_db_vsn)?;
         return set_winner_clock(
             db,
