@@ -8,6 +8,10 @@
 void crsql_clear_stmt_cache(crsql_ExtData *pExtData);
 void crsql_init_table_info_vec(crsql_ExtData *pExtData);
 void crsql_drop_table_info_vec(crsql_ExtData *pExtData);
+void crsql_init_last_site_versions_map(crsql_ExtData *pExtData);
+void crsql_drop_last_site_versions_map(crsql_ExtData *pExtData);
+// void crsql_init_table_info_vec(crsql_ExtData *pExtData);
+// void crsql_drop_table_info_vec(crsql_ExtData *pExtData);
 
 crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
   crsql_ExtData *pExtData = sqlite3_malloc(sizeof *pExtData);
@@ -46,15 +50,35 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
 
   pExtData->dbVersion = -1;
   pExtData->pendingDbVersion = -1;
+
+  pExtData->siteVersion = -1;
+  pExtData->pendingSiteVersion = -1;
+  pExtData->nextSiteVersionSet = 0;
+
+  pExtData->pSetSiteVersionStmt = 0;
+  // printf("instantiating pSetSiteVersionStmt... current rc: %d\n", rc);
+  rc += sqlite3_prepare_v3(
+      db,
+      "INSERT OR REPLACE INTO crsql_site_versions (site_id, version) VALUES "
+      "(?, ?)  ON "
+      "CONFLICT (site_id) DO UPDATE SET version = max(excluded.version, "
+      "crsql_site_versions.version) RETURNING version",
+      -1, SQLITE_PREPARE_PERSISTENT, &(pExtData->pSetSiteVersionStmt), 0);
+
+  // printf("instantiated pSetSiteVersionStmt, rc: %d\n", rc);
+
   pExtData->seq = 0;
   pExtData->pragmaSchemaVersion = -1;
   pExtData->pragmaDataVersion = -1;
   pExtData->pragmaSchemaVersionForTableInfos = -1;
   pExtData->pDbVersionStmt = 0;
+  pExtData->pSiteVersionStmt = 0;
   pExtData->tableInfos = 0;
+  pExtData->lastSiteVersions = 0;
   pExtData->rowsImpacted = 0;
   pExtData->updatedTableInfosThisTx = 0;
   crsql_init_table_info_vec(pExtData);
+  crsql_init_last_site_versions_map(pExtData);
 
   sqlite3_stmt *pStmt;
 
@@ -101,8 +125,11 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
 }
 
 void crsql_freeExtData(crsql_ExtData *pExtData) {
+  // printf("free ext\n");
   sqlite3_free(pExtData->siteId);
   sqlite3_finalize(pExtData->pDbVersionStmt);
+  sqlite3_finalize(pExtData->pSiteVersionStmt);
+  sqlite3_finalize(pExtData->pSetSiteVersionStmt);
   sqlite3_finalize(pExtData->pPragmaSchemaVersionStmt);
   sqlite3_finalize(pExtData->pPragmaDataVersionStmt);
   sqlite3_finalize(pExtData->pSetSyncBitStmt);
@@ -110,8 +137,20 @@ void crsql_freeExtData(crsql_ExtData *pExtData) {
   sqlite3_finalize(pExtData->pSetSiteIdOrdinalStmt);
   sqlite3_finalize(pExtData->pSelectSiteIdOrdinalStmt);
   sqlite3_finalize(pExtData->pSelectClockTablesStmt);
+  // printf("finalized statements\n");
+  pExtData->pDbVersionStmt = 0;
+  pExtData->pSiteVersionStmt = 0;
+  pExtData->pSetSiteVersionStmt = 0;
+  pExtData->pPragmaSchemaVersionStmt = 0;
+  pExtData->pPragmaDataVersionStmt = 0;
+  pExtData->pSetSyncBitStmt = 0;
+  pExtData->pClearSyncBitStmt = 0;
+  pExtData->pSetSiteIdOrdinalStmt = 0;
+  pExtData->pSelectSiteIdOrdinalStmt = 0;
+  pExtData->pSelectClockTablesStmt = 0;
   crsql_clear_stmt_cache(pExtData);
   crsql_drop_table_info_vec(pExtData);
+  crsql_drop_last_site_versions_map(pExtData);
   sqlite3_free(pExtData);
 }
 
@@ -121,7 +160,10 @@ void crsql_freeExtData(crsql_ExtData *pExtData) {
 // see https://sqlite.org/forum/forumpost/c94f943821
 // `freeExtData` is called after finalization when the extension unloads
 void crsql_finalize(crsql_ExtData *pExtData) {
+  // printf("crsql_finalize\n");
   sqlite3_finalize(pExtData->pDbVersionStmt);
+  sqlite3_finalize(pExtData->pSiteVersionStmt);
+  sqlite3_finalize(pExtData->pSetSiteVersionStmt);
   sqlite3_finalize(pExtData->pPragmaSchemaVersionStmt);
   sqlite3_finalize(pExtData->pPragmaDataVersionStmt);
   sqlite3_finalize(pExtData->pSetSyncBitStmt);
@@ -131,6 +173,8 @@ void crsql_finalize(crsql_ExtData *pExtData) {
   sqlite3_finalize(pExtData->pSelectClockTablesStmt);
   crsql_clear_stmt_cache(pExtData);
   pExtData->pDbVersionStmt = 0;
+  pExtData->pSiteVersionStmt = 0;
+  pExtData->pSetSiteVersionStmt = 0;
   pExtData->pPragmaSchemaVersionStmt = 0;
   pExtData->pPragmaDataVersionStmt = 0;
   pExtData->pSetSyncBitStmt = 0;

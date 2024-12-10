@@ -423,8 +423,8 @@ fn maybe_recreate_index(
     let fetch_idx_cols_mem = mem_db.prepare_v2(IDX_COLS_SQL)?;
     let fetch_idx_cols_local = local_db.prepare_v2(IDX_COLS_SQL)?;
 
-    let mem_result = fetch_idx_cols_mem.step()?;
-    let local_result = fetch_idx_cols_local.step()?;
+    let mut mem_result = fetch_idx_cols_mem.step()?;
+    let mut local_result = fetch_idx_cols_local.step()?;
     while mem_result == ResultCode::ROW && local_result == ResultCode::ROW {
         if fetch_idx_cols_mem.column_text(0) != fetch_idx_cols_local.column_text(0) {
             // We cannot alter a table against which we have open statements
@@ -433,8 +433,8 @@ fn maybe_recreate_index(
             drop(fetch_idx_cols_mem);
             return recreate_index(local_db, idx);
         }
-        fetch_idx_cols_mem.step()?;
-        fetch_idx_cols_local.step()?;
+        mem_result = fetch_idx_cols_mem.step()?;
+        local_result = fetch_idx_cols_local.step()?;
     }
 
     if mem_result != local_result {

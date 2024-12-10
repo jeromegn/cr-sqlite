@@ -42,7 +42,7 @@ pub fn get_dflt_value(
     return Ok(Some(String::from(stmt.column_text(0)?)));
 }
 
-pub fn get_db_version_union_query(tbl_names: &Vec<String>) -> String {
+pub fn get_db_version_union_query(tbl_names: &[String]) -> String {
     let unions_str = tbl_names
         .iter()
         .map(|tbl_name| {
@@ -54,11 +54,11 @@ pub fn get_db_version_union_query(tbl_names: &Vec<String>) -> String {
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
 
-    return format!(
+    format!(
         "SELECT max(version) as version FROM ({} UNION SELECT value as
         version FROM crsql_master WHERE key = 'pre_compact_dbversion')",
         unions_str
-    );
+    )
 }
 
 pub fn slab_rowid(idx: i32, rowid: sqlite::int64) -> sqlite::int64 {

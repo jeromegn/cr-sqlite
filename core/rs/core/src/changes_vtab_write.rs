@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
 use alloc::format;
 use alloc::vec::Vec;
@@ -13,6 +14,7 @@ use crate::c::{crsql_Changes_vtab, CrsqlChangesColumn};
 use crate::compare_values::crsql_compare_sqlite_values;
 use crate::pack_columns::bind_package_to_stmt;
 use crate::pack_columns::{unpack_columns, ColumnValue};
+use crate::site_version::insert_site_version;
 use crate::stmt_cache::reset_cached_stmt;
 use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, TableInfo};
 use crate::util::slab_rowid;
@@ -93,7 +95,11 @@ fn did_cid_win(
             let local_value = col_val_stmt.column_value(0)?;
             let mut ret = crsql_compare_sqlite_values(insert_val, local_value);
             reset_cached_stmt(col_val_stmt.stmt)?;
+            // libc_print::libc_println!("mergeEqualValues ? {}", unsafe {
+            //     (*ext_data).mergeEqualValues
+            // });
             if ret == 0 && unsafe { (*ext_data).mergeEqualValues == 1 } {
+                // libc_print::libc_println!("SAME VALUE + mergeEqualValues == 1");
                 // values are the same (ret == 0) and the option to tie break on site_id is true
                 let col_site_id_stmt_ref = tbl_info.get_col_site_id_stmt(db)?;
                 let col_site_id_stmt = col_site_id_stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
@@ -113,6 +119,10 @@ fn did_cid_win(
                     Ok(ResultCode::ROW) => {
                         let local_site_id = col_site_id_stmt.column_blob(0)?;
                         ret = insert_site_id.cmp(local_site_id) as c_int;
+
+                        // libc_print::libc_println!("returning {}", ret);
+                        // libc_print::libc_println!("{:?} (local)", local_site_id);
+                        // libc_print::libc_println!("{:?} (insert)", insert_site_id);
 
                         // reset the stmt after, we're accessing a slice in-memory
                         reset_cached_stmt(col_site_id_stmt.stmt)?;
@@ -161,10 +171,21 @@ fn set_winner_clock(
     insert_db_vrsn: sqlite::int64,
     insert_site_id: &[u8],
     insert_seq: sqlite::int64,
+    insert_site_vrsn: sqlite::int64,
 ) -> Result<sqlite::int64, ResultCode> {
     // set the site_id ordinal
     // get the returned ordinal
     // use that in place of insert_site_id in the metadata table(s)
+
+    // libc_print::libc_println!("set winner clock! col_name = {}, col_vrsn = {}, db_vrsn = {}, site_id = {:?}, seq = {}, site_vrsn = {}",
+
+    //     insert_col_name,
+    //     insert_col_vrsn,
+    //     insert_db_vrsn,
+    //     insert_site_id,
+    //     insert_seq,
+    //     insert_site_vrsn,
+    // );
 
     // on changes read, join to gather the proper site id.
     let ordinal = unsafe {
@@ -223,24 +244,30 @@ fn set_winner_clock(
         .and_then(|_| match ordinal {
             Some(ordinal) => set_stmt.bind_int64(6, ordinal),
             None => set_stmt.bind_null(6),
-        });
+        })
+        .and_then(|_| set_stmt.bind_int64(7, insert_site_vrsn));
 
     if let Err(rc) = bind_result {
         reset_cached_stmt(set_stmt.stmt)?;
         return Err(rc);
     }
 
-    match set_stmt.step() {
+    let rowid = match set_stmt.step() {
         Ok(ResultCode::ROW) => {
             let rowid = set_stmt.column_int64(0);
             reset_cached_stmt(set_stmt.stmt)?;
-            Ok(rowid)
+            rowid
         }
         _ => {
             reset_cached_stmt(set_stmt.stmt)?;
-            Err(ResultCode::ERROR)
+            return Err(ResultCode::ERROR);
         }
+    };
+
+    if !insert_site_id.is_empty() {
+        insert_site_version(ext_data, insert_site_id, insert_site_vrsn)?;
     }
+    Ok(rowid)
 }
 
 fn merge_sentinel_only_insert(
@@ -253,6 +280,7 @@ fn merge_sentinel_only_insert(
     remote_db_vsn: sqlite::int64,
     remote_site_id: &[u8],
     remote_seq: sqlite::int64,
+    remote_site_vrsn: sqlite::int64,
 ) -> Result<sqlite::int64, ResultCode> {
     let merge_stmt_ref = tbl_info.get_merge_pk_only_insert_stmt(db)?;
     let merge_stmt = merge_stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
@@ -287,7 +315,7 @@ fn merge_sentinel_only_insert(
         return Err(rc);
     }
 
-    if let Ok(_) = rc {
+    if rc.is_ok() {
         zero_clocks_on_resurrect(db, tbl_info, key, remote_db_vsn)?;
         return set_winner_clock(
             db,
@@ -299,6 +327,7 @@ fn merge_sentinel_only_insert(
             remote_db_vsn,
             remote_site_id,
             remote_seq,
+            remote_site_vrsn,
         );
     }
 
@@ -332,6 +361,7 @@ unsafe fn merge_delete(
     remote_db_vrsn: sqlite::int64,
     remote_site_id: &[u8],
     remote_seq: sqlite::int64,
+    remote_site_vrsn: sqlite::int64,
 ) -> Result<sqlite::int64, ResultCode> {
     let delete_stmt_ref = tbl_info.get_merge_delete_stmt(db)?;
     let delete_stmt = delete_stmt_ref.as_ref().ok_or(ResultCode::ERROR)?;
@@ -370,6 +400,7 @@ unsafe fn merge_delete(
         remote_db_vrsn,
         remote_site_id,
         remote_seq,
+        remote_site_vrsn,
     )?;
 
     // Drop clocks _after_ setting the winner clock so we don't lose track of the max db_version!!
@@ -443,6 +474,7 @@ unsafe fn merge_insert(
     rowid: *mut sqlite::int64,
     errmsg: *mut *mut c_char,
 ) -> Result<ResultCode, ResultCode> {
+    // libc_print::libc_println!("merge_insert");
     let tab = vtab.cast::<crsql_Changes_vtab>();
     let db = (*tab).db;
 
@@ -477,6 +509,7 @@ unsafe fn merge_insert(
     let insert_site_id = args[2 + CrsqlChangesColumn::SiteId as usize];
     let insert_cl = args[2 + CrsqlChangesColumn::Cl as usize].int64();
     let insert_seq = args[2 + CrsqlChangesColumn::Seq as usize].int64();
+    let insert_site_vrsn = args[2 + CrsqlChangesColumn::SiteVrsn as usize].int64();
 
     if insert_site_id.bytes() > crate::consts::SITE_ID_LEN {
         let err = CString::new("crsql - site id exceeded max length")?;
@@ -485,6 +518,13 @@ unsafe fn merge_insert(
     }
 
     let insert_site_id = insert_site_id.blob();
+
+    // libc_print::libc_println!(
+    //     "insert site id = {:?}, site version = {}",
+    //     insert_site_id,
+    //     insert_site_vrsn
+    // );
+
     let tbl_infos = mem::ManuallyDrop::new(Box::from_raw(
         (*(*tab).pExtData).tableInfos as *mut Vec<TableInfo>,
     ));
@@ -543,6 +583,7 @@ unsafe fn merge_insert(
             insert_db_vrsn,
             insert_site_id,
             insert_seq,
+            insert_site_vrsn,
         );
         match merge_result {
             Err(rc) => {
@@ -580,6 +621,7 @@ unsafe fn merge_insert(
             insert_db_vrsn,
             insert_site_id,
             insert_seq,
+            insert_site_vrsn,
         );
         match merge_result {
             Err(rc) => {
@@ -617,6 +659,7 @@ unsafe fn merge_insert(
             insert_db_vrsn,
             insert_site_id,
             insert_seq,
+            insert_site_vrsn,
         )?;
         (*(*tab).pExtData).rowsImpacted += 1;
     }
@@ -643,8 +686,10 @@ unsafe fn merge_insert(
     if !does_cid_win {
         // doesCidWin == 0? compared against our clocks, nothing wins. OK and
         // Done.
+        // libc_print::libc_println!("CID did not win");
         return Ok(ResultCode::OK);
     }
+    // libc_print::libc_println!("remote won!");
 
     // TODO: this is all almost identical between all three merge cases!
     let merge_stmt_ref = tbl_info.get_merge_insert_stmt(db, insert_col)?;
@@ -671,12 +716,8 @@ unsafe fn merge_insert(
         .step()
         .and_then(|_| (*(*tab).pExtData).pClearSyncBitStmt.reset());
 
-    if let Err(rc) = rc {
-        return Err(rc);
-    }
-    if let Err(sync_rc) = sync_rc {
-        return Err(sync_rc);
-    }
+    rc?;
+    sync_rc?;
 
     let merge_result = set_winner_clock(
         db,
@@ -688,6 +729,7 @@ unsafe fn merge_insert(
         insert_db_vrsn,
         insert_site_id,
         insert_seq,
+        insert_site_vrsn,
     );
     match merge_result {
         Err(rc) => {

@@ -39,25 +39,38 @@ fn after_insert(
     tbl_info: &TableInfo,
     pks_new: &[*mut value],
 ) -> Result<ResultCode, String> {
+    // libc_print::libc_println!("after_insert");
     let db_version = crate::db_version::next_db_version(db, ext_data, None)?;
+    let site_version = crate::site_version::next_site_version(db, ext_data)?;
+    // libc_print::libc_println!("next site version: {}", site_version);
     let (create_record_existed, key_new) = tbl_info
         .get_or_create_key_for_insert(db, pks_new)
-        .or_else(|_| Err("failed geteting or creating lookaside key"))?;
-    if tbl_info.non_pks.len() == 0 {
+        .map_err(|_| "failed geteting or creating lookaside key")?;
+    if tbl_info.non_pks.is_empty() {
         let seq = bump_seq(ext_data);
         // just a sentinel record
-        return super::mark_new_pk_row_created(db, tbl_info, key_new, db_version, seq);
+        return super::mark_new_pk_row_created(
+            db,
+            tbl_info,
+            key_new,
+            db_version,
+            seq,
+            site_version,
+        );
     } else if create_record_existed {
         // update the create record since it already exists.
         let seq = bump_seq(ext_data);
-        update_create_record(db, tbl_info, key_new, db_version, seq)?;
+        update_create_record(db, tbl_info, key_new, db_version, seq, site_version)?;
     }
 
     // now for each non-pk column, create or update the column record
-    for col in tbl_info.non_pks.iter() {
-        let seq = bump_seq(ext_data);
-        super::mark_locally_updated(db, tbl_info, key_new, col, db_version, seq)?;
-    }
+    // for col in tbl_info.non_pks.iter() {
+    //     let seq = bump_seq(ext_data);
+    //     super::mark_locally_updated(db, tbl_info, key_new, col, db_version, seq, site_version)?;
+    // }
+
+    super::mark_locally_inserted(db, ext_data, tbl_info, key_new, db_version, site_version)?;
+
     Ok(ResultCode::OK)
 }
 
@@ -67,10 +80,11 @@ fn update_create_record(
     new_key: sqlite::int64,
     db_version: sqlite::int64,
     seq: i32,
+    site_version: sqlite::int64,
 ) -> Result<ResultCode, String> {
     let update_create_record_stmt_ref = tbl_info
         .get_maybe_mark_locally_reinserted_stmt(db)
-        .or_else(|_e| Err("failed to get update_create_record_stmt"))?;
+        .map_err(|_e| "failed to get update_create_record_stmt")?;
     let update_create_record_stmt = update_create_record_stmt_ref
         .as_ref()
         .ok_or("Failed to deref update_create_record_stmt")?;
@@ -78,15 +92,16 @@ fn update_create_record(
     update_create_record_stmt
         .bind_int64(1, db_version)
         .and_then(|_| update_create_record_stmt.bind_int(2, seq))
-        .and_then(|_| update_create_record_stmt.bind_int64(3, new_key))
+        .and_then(|_| update_create_record_stmt.bind_int64(3, site_version))
+        .and_then(|_| update_create_record_stmt.bind_int64(4, new_key))
         .and_then(|_| {
             update_create_record_stmt.bind_text(
-                4,
+                5,
                 crate::c::INSERT_SENTINEL,
                 sqlite::Destructor::STATIC,
             )
         })
-        .or_else(|_e| Err("failed binding to update_create_record_stmt"))?;
+        .map_err(|_e| "failed binding to update_create_record_stmt")?;
 
     super::step_trigger_stmt(update_create_record_stmt)
 }
