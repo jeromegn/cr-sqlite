@@ -1,3 +1,4 @@
+use alloc::collections::BTreeMap;
 use core::ffi::{c_char, c_int};
 use core::mem::ManuallyDrop;
 
@@ -10,8 +11,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use sqlite::sqlite3;
 use sqlite::{Context, ManagedStmt, Value};
-use sqlite_nostd as sqlite;
 use sqlite_nostd::ResultCode;
+use sqlite_nostd::{self as sqlite, changes64};
 
 use crate::tableinfo::{crsql_ensure_table_infos_are_up_to_date, ColumnInfo, TableInfo};
 
@@ -61,13 +62,16 @@ where
 fn step_trigger_stmt(stmt: &ManagedStmt) -> Result<ResultCode, String> {
     match stmt.step() {
         Ok(ResultCode::DONE) => {
+            // libc_print::libc_eprintln!("stepped code: DONE");
             reset_cached_stmt(stmt.stmt)
                 .map_err(|_e| "done -- unable to reset cached trigger stmt")?;
             Ok(ResultCode::OK)
         }
         Ok(code) | Err(code) => {
-            reset_cached_stmt(stmt.stmt)
-                .map_err(|_e| "error -- unable to reset cached trigger stmt")?;
+            // libc_print::libc_eprintln!("stepped code: {code}");
+            reset_cached_stmt(stmt.stmt).map_err(|_e| {
+                format!("error -- unable to reset cached trigger stmt, code {code}")
+            })?;
             Err(format!(
                 "unexpected result code from tigger_stmt.step: {}",
                 code
@@ -105,6 +109,109 @@ fn bump_seq(ext_data: *mut crsql_ExtData) -> c_int {
         (*ext_data).seq += 1;
         (*ext_data).seq - 1
     }
+}
+
+#[allow(non_snake_case)]
+fn mark_locally_inserted(
+    db: *mut sqlite3,
+    ext_data: *mut crsql_ExtData,
+    tbl_info: &TableInfo,
+    new_key: sqlite::int64,
+    db_version: sqlite::int64,
+    site_version: sqlite::int64,
+) -> Result<ResultCode, String> {
+    let mut last_seq = None;
+    let mut to_insert = Vec::with_capacity(tbl_info.non_pks.len());
+
+    let update_clock_stmt_ref = tbl_info
+        .get_update_clock_stmt(db)
+        .map_err(|_e| "failed to get update_clock_stmt")?;
+    let update_clock_stmt = update_clock_stmt_ref
+        .as_ref()
+        .ok_or("Failed to deref update_clock_stmt")?;
+
+    for (i, col) in tbl_info.non_pks.iter().enumerate() {
+        let seq = last_seq.take().unwrap_or_else(|| bump_seq(ext_data));
+        update_clock_stmt
+            .bind_int64(1, db_version)
+            .and_then(|_| update_clock_stmt.bind_int(2, seq))
+            .and_then(|_| update_clock_stmt.bind_int64(3, site_version))
+            .and_then(|_| update_clock_stmt.bind_int64(4, new_key))
+            .and_then(|_| update_clock_stmt.bind_text(5, &col.name, sqlite::Destructor::STATIC))
+            .map_err(|_| "failed binding to update_clock_stmt")?;
+
+        step_trigger_stmt(update_clock_stmt)?;
+
+        if changes64(db) == 0 {
+            // keep last seq to reuse
+            last_seq = Some(seq);
+            to_insert.push(i);
+        }
+    }
+
+    if !to_insert.is_empty() {
+        if to_insert.len() == tbl_info.non_pks.len() {
+            // fast path, insert all at once!
+            let combo_insert_clock_stmt_ref = tbl_info
+                .get_combo_insert_clock_stmt(db)
+                .map_err(|_e| "failed to get combo_insert_clock_stmt")?;
+            let combo_insert_clock_stmt = combo_insert_clock_stmt_ref
+                .as_ref()
+                .ok_or("Failed to deref combo_insert_clock_stmt")?;
+            for (i, col) in tbl_info.non_pks.iter().enumerate() {
+                let seq = last_seq.take().unwrap_or_else(|| bump_seq(ext_data));
+                let offset = i as i32 * 5;
+
+                combo_insert_clock_stmt
+                    .bind_int64(offset + 1, new_key)
+                    .and_then(|_| {
+                        combo_insert_clock_stmt.bind_text(
+                            offset + 2,
+                            &col.name,
+                            sqlite::Destructor::STATIC,
+                        )
+                    })
+                    .and_then(|_| combo_insert_clock_stmt.bind_int64(offset + 3, db_version))
+                    .and_then(|_| combo_insert_clock_stmt.bind_int(offset + 4, seq))
+                    .and_then(|_| combo_insert_clock_stmt.bind_int64(offset + 5, site_version))
+                    .map_err(|code| {
+                        format!("failed binding to combo_insert_clock_stmt, code: {code}")
+                    })?;
+            }
+
+            step_trigger_stmt(combo_insert_clock_stmt)?;
+        } else {
+            // mildly slower path...
+            let insert_clock_stmt_ref = tbl_info
+                .get_insert_clock_stmt(db)
+                .map_err(|_e| "failed to get insert_clock_stmt")?;
+            let insert_clock_stmt = insert_clock_stmt_ref
+                .as_ref()
+                .ok_or("Failed to deref insert_clock_stmt")?;
+
+            for col_index in to_insert {
+                let col = tbl_info
+                    .non_pks
+                    .get(col_index)
+                    .ok_or("cannot find col for index...")?;
+                let seq = last_seq.take().unwrap_or_else(|| bump_seq(ext_data));
+
+                insert_clock_stmt
+                    .bind_int64(1, new_key)
+                    .and_then(|_| {
+                        insert_clock_stmt.bind_text(2, &col.name, sqlite::Destructor::STATIC)
+                    })
+                    .and_then(|_| insert_clock_stmt.bind_int64(3, db_version))
+                    .and_then(|_| insert_clock_stmt.bind_int(4, seq))
+                    .and_then(|_| insert_clock_stmt.bind_int64(5, site_version))
+                    .map_err(|_| "failed binding to insert_clock_stmt")?;
+
+                step_trigger_stmt(insert_clock_stmt)?;
+            }
+        }
+    }
+
+    Ok(ResultCode::OK)
 }
 
 #[allow(non_snake_case)]

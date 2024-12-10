@@ -58,6 +58,7 @@ pub struct TableInfo {
     zero_clocks_on_resurrect_stmt: RefCell<Option<ManagedStmt>>,
 
     // For local writes --
+    combo_insert_clock_stmt: RefCell<Option<ManagedStmt>>,
     select_clock_stmt: RefCell<Option<ManagedStmt>>,
     insert_clock_stmt: RefCell<Option<ManagedStmt>>,
     update_clock_stmt: RefCell<Option<ManagedStmt>>,
@@ -512,6 +513,29 @@ impl TableInfo {
         Ok(self.mark_locally_created_stmt.try_borrow()?)
     }
 
+    pub fn get_combo_insert_clock_stmt(
+        &self,
+        db: *mut sqlite3,
+    ) -> Result<Ref<Option<ManagedStmt>>, ResultCode> {
+        if self.combo_insert_clock_stmt.try_borrow()?.is_none() {
+            let sql = format!(
+                "INSERT OR IGNORE INTO \"{table_name}__crsql_clock\" (
+                    key, col_name, col_version, db_version, seq, site_id, site_version
+                ) VALUES {values};",
+                values = self
+                    .non_pks
+                    .iter()
+                    .map(|_col| "(?, ?, 1, ?, ?, 0, ?)")
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                table_name = crate::util::escape_ident(&self.tbl_name)
+            );
+            let ret = db.prepare_v3(&sql, sqlite::PREPARE_PERSISTENT)?;
+            *self.combo_insert_clock_stmt.try_borrow_mut()? = Some(ret);
+        }
+        Ok(self.combo_insert_clock_stmt.try_borrow()?)
+    }
+
     pub fn get_select_clock_stmt(
         &self,
         db: *mut sqlite3,
@@ -939,6 +963,7 @@ pub fn pull_table_info(
         move_non_sentinels_stmt: RefCell::new(None),
         mark_locally_created_stmt: RefCell::new(None),
         maybe_mark_locally_reinserted_stmt: RefCell::new(None),
+        combo_insert_clock_stmt: RefCell::new(None),
         select_clock_stmt: RefCell::new(None),
         insert_clock_stmt: RefCell::new(None),
         update_clock_stmt: RefCell::new(None),

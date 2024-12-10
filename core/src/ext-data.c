@@ -74,7 +74,7 @@ crsql_ExtData *crsql_newExtData(sqlite3 *db, unsigned char *siteIdBuffer) {
   pExtData->pDbVersionStmt = 0;
   pExtData->pSiteVersionStmt = 0;
   pExtData->tableInfos = 0;
-  pExtData->pkLru = 0;
+  pExtData->keyCache = 0;
   pExtData->lastSiteVersions = 0;
   pExtData->rowsImpacted = 0;
   pExtData->updatedTableInfosThisTx = 0;

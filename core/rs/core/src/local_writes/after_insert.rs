@@ -64,10 +64,13 @@ fn after_insert(
     }
 
     // now for each non-pk column, create or update the column record
-    for col in tbl_info.non_pks.iter() {
-        let seq = bump_seq(ext_data);
-        super::mark_locally_updated(db, tbl_info, key_new, col, db_version, seq, site_version)?;
-    }
+    // for col in tbl_info.non_pks.iter() {
+    //     let seq = bump_seq(ext_data);
+    //     super::mark_locally_updated(db, tbl_info, key_new, col, db_version, seq, site_version)?;
+    // }
+
+    super::mark_locally_inserted(db, ext_data, tbl_info, key_new, db_version, site_version)?;
+
     Ok(ResultCode::OK)
 }
 
